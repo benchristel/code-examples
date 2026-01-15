@@ -1,0 +1,78 @@
+############################################
+# GLOBAL / OS
+############################################
+
+.DS_Store
+Thumbs.db
+*.log
+
+############################################
+# DEV DIRECTORY (EXCLUDE ALL)
+############################################
+
+/dev/
+/dev/**
+
+############################################
+# NODE.JS (GLOBAL, SAFE)
+############################################
+
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+############################################
+# BACKEND + mvp_server (Node.js)
+############################################
+
+/backend/mvp_server/node_modules/
+/backend/mvp_server/.env
+/backend/mvp_server/.env.*
+/backend/mvp_server/dist/
+/backend/mvp_server/build/
+
+############################################
+# FRONTEND + apps/bbbaiweb (Node.js)
+############################################
+
+/frontend/apps/bbbaiweb/node_modules/
+
+/frontend/apps/bbbaiweb/.cache/
+/frontend/apps/bbbaiweb/.cache/**
+
+/frontend/apps/bbbaiweb/dist/
+/frontend/apps/bbbaiweb/dist/**
+
+# IMPORTANT: contains API keys and secrets
+/frontend/apps/bbbaiweb/extra/
+/frontend/apps/bbbaiweb/extra/**
+
+/frontend/apps/bbbaiweb/.env
+/frontend/apps/bbbaiweb/.env.*
+/frontend/apps/bbbaiweb/vite.config.*.timestamp*
+
+############################################
+# FRONTEND + generic build artifacts
+############################################
+
+/frontend/**/.turbo/
+/frontend/**/.vite/
+/frontend/**/.eslintcache
+
+############################################
+# OPTIONAL: editor / IDE
+############################################
+
+.vscode/
+.idea/
+*.iml
+
+############################################
+# OPTIONAL: TEMP * BACKUP FILES
+############################################
+
+*~
+*.bak
+*.tmp

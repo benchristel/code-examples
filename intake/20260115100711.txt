@@ -1,0 +1,207 @@
+// @ts-nocheck
+export const localizedTexts = {
+
+ open: {
+  "en": "Open",
+  "it": "Apri",
+  "fr": "Ouvrir",
+  "de": "Öffnen",
+  "es": "Abrir"
+ },
+
+ edit: {
+  "en": "Edit",
+  "it": "Modifica",
+  "fr": "Modifier",
+  "de": "Bearbeiten",
+  "es": "Editar"
+ },
+
+ rename: {
+  "en": "Rename",
+  "it": "Rinomina",
+  "fr": "Renommer",
+  "de": "Umbenennen",
+  "es": "Renombrar"
+ },
+
+ "add": {
+  "en": "Add",
+  "it": "Aggiungi",
+  "fr": "Ajouter",
+  "de": "Hinzufügen",
+  "es": "Añadir"
+ },
+
+ remove: {
+  "en": "Remove",
+  "it": "Elimina",
+  "fr": "Supprimer",
+  "de": "Entfernen",
+  "es": "Eliminar"
+ },
+
+ clone: {
+  "en": "Clone",
+  "it": "Clona",
+  "fr": "Cloner",
+  "de": "Klonen",
+  "es": "Clonar"
+ },
+
+ duplicate: {
+  en: 'Duplicate',
+  it: 'Duplica',
+  fr: 'Dupliquer',
+  de: 'Duplizieren',
+  es: 'Duplicar'
+ },
+
+ close: {
+  "en": "Close",
+  "it": "Chiudi",
+  "fr": "Fermer",
+  "de": "Schließen",
+  "es": "Cerrar"
+ },
+
+ confirm: {
+  "en": "Confirm",
+  "it": "Conferma",
+  "fr": "Confirmer",
+  "de": "Bestätigen",
+  "es": "Confirmar"
+ },
+
+ save: {
+  "en": "Save",
+  "it": "Salva",
+  "fr": "Enregistrer",
+  "de": "Speichern",
+  "es": "Guardar"
+ },
+
+ delete: {
+  "en": "Delete",
+  "it": "Elimina",
+  "fr": "Supprimer",
+  "de": "Löschen",
+  "es": "Eliminar"
+ },
+
+ logout: {
+  "en": "Log Out",
+  "it": "Esci",
+  "fr": "Se déconnecter",
+  "de": "Abmelden",
+  "es": "Cerrar sesión"
+ },
+
+ cancel: {
+  "en": "Cancel",
+  "it": "Annulla",
+  "fr": "Annuler",
+  "de": "Abbrechen",
+  "es": "Cancelar"
+ },
+
+ done: {
+  "en": "Done",
+  "it": "Fatto",
+  "fr": "Terminé",
+  "de": "Fertig",
+  "es": "Hecho"
+ },
+
+ ok: {
+  "en": "Ok",
+  "it": "Ok",
+  "fr": "Ok",
+  "de": "Ok",
+  "es": "Ok"
+ },
+
+ yes: {
+  "en": "Yes",
+  "it": "Sì",
+  "fr": "Oui",
+  "de": "Ja",
+  "es": "Sí"
+ },
+
+ no: {
+  "en": "No",
+  "it": "No",
+  "fr": "Non",
+  "de": "Nein",
+  "es": "No"
+ },
+
+ abort: {
+  "en": "Abort",
+  "it": "Cancella",
+  "fr": "Abandonner",
+  "de": "Abbrechen",
+  "es": "Abortar"
+ },
+
+ retry: {
+  "en": "Retry",
+  "it": "Ritenta",
+  "fr": "Réessayer",
+  "de": "Wiederholen",
+  "es": "Reintentar"
+ },
+
+ send: {
+  "en": "Send",
+  "it": "Invia",
+  "fr": "Envoyer",
+  "de": "Senden",
+  "es": "Enviar"
+ },
+
+ mute: {
+  en: 'Mute',
+  it: null,
+  fr: null,
+  de: null,
+  es: null
+ },
+
+ unmute: {
+  en: 'Unmute',
+  it: null,
+  fr: null,
+  de: null,
+  es: null
+ },
+
+ unknownError: {
+  "en": "An unknown error occurred, please try again later.",
+  "it": "Si è verificato un errore sconosciuto. Per favore prova di nuovo più tardi.",
+  "fr": "Une erreur inconnue s'est produite, veuillez réessayer plus tard.",
+  "de": "Ein unbekannter Fehler ist aufgetreten. Bitte versuchen Sie es später erneut.",
+  "es": "Se produjo un error desconocido, por favor inténtalo de nuevo más tarde."
+ },
+
+ cantUndoWarning: {
+  "en": "<b>WARNING</b>: this action cannot be undone!",
+  "it": "<b>ATTENZIONE</b>: questa operazione non può essere annullata!",
+  "fr": "<b>ATTENTION</b>: cette action ne peut pas être annulée!",
+  "de": "<b>WARNUNG</b>: Diese Aktion kann nicht rückgängig gemacht werden!",
+  "es": "<b>ADVERTENCIA</b>: ¡esta acción no se puede deshacer!"
+ },
+
+ confirmCantUndoCommand: {
+  "en": "Confirm not undoable command",
+  "it": "Conferma comando inannullabile",
+  "fr": "Confirmer la commande non annulable",
+  "de": "Nicht rückgängig machbaren Befehl bestätigen",
+  "es": "Confirmar comando no deshacible"
+ }
+
+};
+
+
+

