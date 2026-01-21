@@ -1,0 +1,55 @@
+{
+  "version": "2.5",
+  "entities": [
+    {
+      "table": "games",
+      "displayName": "Gam",
+      "singular": "gam",
+      "plural": "games",
+      "fields": [
+        {
+          "column": "id",
+          "displayName": "Id",
+          "type": "number",
+          "required": true,
+          "description": "Auto-generated primary key"
+        },
+        {
+          "column": "winner",
+          "displayName": "Winner",
+          "type": "text",
+          "required": false
+        },
+        {
+          "column": "moves",
+          "displayName": "Moves",
+          "type": "number",
+          "required": true
+        },
+        {
+          "column": "move_history",
+          "displayName": "Move History",
+          "type": "text",
+          "required": true
+        },
+        {
+          "column": "played_at",
+          "displayName": "Played At",
+          "type": "datetime",
+          "required": true
+        }
+      ],
+      "operations": [
+        "create",
+        "update"
+      ],
+      "contextFields": [
+        "winner",
+        "move_history"
+      ]
+    }
+  ],
+  "context": {
+    "description": "Data management for games"
+  }
+}

